@@ -152,47 +152,63 @@ class IRCircularScraper:
 
     # -- crawl --
 
+    # Flush the index to disk this often (in documents handled), so a crash,
+    # closed terminal, or sleeping PC during a many-hour crawl never loses
+    # everything back to zero — only the docs handled since the last flush.
+    INDEX_FLUSH_EVERY = 25
+
     def crawl(self) -> list[DocumentRecord]:
         root_id = extract_menu_id(self.root_url) or "root"
         queue: deque[MenuNode] = deque([MenuNode(id=root_id, url=self.root_url, breadcrumb="")])
+        docs_since_flush = 0
 
-        while queue:
-            if self.max_pages is not None and self.pages_visited >= self.max_pages:
-                logger.info("Reached max_pages=%s, stopping crawl.", self.max_pages)
-                break
+        try:
+            while queue:
+                if self.max_pages is not None and self.pages_visited >= self.max_pages:
+                    logger.info("Reached max_pages=%s, stopping crawl.", self.max_pages)
+                    break
 
-            node = queue.popleft()
-            if node.id in self.visited_menu_ids:
-                continue
-            self.visited_menu_ids.add(node.id)
+                node = queue.popleft()
+                if node.id in self.visited_menu_ids:
+                    continue
+                self.visited_menu_ids.add(node.id)
 
-            html = self.fetch_page(node.url)
-            self.pages_visited += 1
-            if html is None:
-                logger.info("PAGE FAIL id=%s url=%s", node.id, node.url)
-                continue
+                html = self.fetch_page(node.url)
+                self.pages_visited += 1
+                if html is None:
+                    logger.info("PAGE FAIL id=%s url=%s", node.id, node.url)
+                    continue
 
-            soup = BeautifulSoup(html, "html.parser")
-            page_title = self._page_title(soup, node)
-            breadcrumb = f"{node.breadcrumb} > {page_title}".strip(" >") if node.breadcrumb else page_title
+                soup = BeautifulSoup(html, "html.parser")
+                page_title = self._page_title(soup, node)
+                breadcrumb = (
+                    f"{node.breadcrumb} > {page_title}".strip(" >") if node.breadcrumb else page_title
+                )
 
-            sub_menus, docs = self._parse_links(soup, node.url)
-            logger.info(
-                "PAGE OK id=%s url=%s links=%d docs=%d",
-                node.id,
-                node.url,
-                len(sub_menus),
-                len(docs),
-            )
+                sub_menus, docs = self._parse_links(soup, node.url)
+                logger.info(
+                    "PAGE OK id=%s url=%s links=%d docs=%d",
+                    node.id,
+                    node.url,
+                    len(sub_menus),
+                    len(docs),
+                )
 
-            for doc_url, doc_title, date_text in docs:
-                self._handle_document(doc_url, doc_title, date_text, breadcrumb, node.id)
+                for doc_url, doc_title, date_text in docs:
+                    self._handle_document(doc_url, doc_title, date_text, breadcrumb, node.id)
+                    docs_since_flush += 1
+                    if docs_since_flush >= self.INDEX_FLUSH_EVERY:
+                        write_index(self.records, self.out_dir)
+                        docs_since_flush = 0
 
-            for sub_id, sub_url in sub_menus:
-                if sub_id not in self.visited_menu_ids:
-                    queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=breadcrumb))
+                for sub_id, sub_url in sub_menus:
+                    if sub_id not in self.visited_menu_ids:
+                        queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=breadcrumb))
+        finally:
+            # Always persist whatever we have, even on KeyboardInterrupt or
+            # an unexpected exception mid-crawl.
+            write_index(self.records, self.out_dir)
 
-        write_index(self.records, self.out_dir)
         return self.records
 
     def _page_title(self, soup: BeautifulSoup, node: MenuNode) -> str:
