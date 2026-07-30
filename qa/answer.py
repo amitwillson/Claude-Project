@@ -42,6 +42,7 @@ class Citation:
     date: str
     section_path: str
     source_url: str
+    local_path: str
     chunk_id: str
 
 
@@ -115,6 +116,7 @@ def answer_question(
             date=c.date,
             section_path=c.section_path,
             source_url=c.source_url,
+            local_path=c.local_path,
             chunk_id=c.chunk_id,
         )
         for c in chunks

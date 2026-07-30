@@ -56,7 +56,8 @@ def main(argv=None) -> int:
         print("(none)")
     for i, c in enumerate(answer.citations, start=1):
         print(f"{i}. {c.title} — {c.date or 'unknown date'} — {c.section_path}")
-        print(f"   {c.source_url}")
+        print(f"   Source: {c.source_url}")
+        print(f"   Local PDF: {c.local_path}")
 
     conn.close()
     return 0

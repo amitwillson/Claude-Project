@@ -81,6 +81,18 @@ if submitted and question.strip():
     for i, c in enumerate(chunks, start=1):
         with st.expander(f"{i}. {c.title} — {c.date or 'unknown date'} ({c.source})"):
             st.write(f"**Section:** {c.section_path}")
-            st.write(f"**Source URL:** {c.source_url}")
-            st.write(f"**Local file:** {c.local_path}")
+            st.markdown(f"**Source URL:** [{c.source_url}]({c.source_url})")
+
+            pdf_path = Path(c.local_path) if c.local_path else None
+            if pdf_path and pdf_path.exists():
+                st.download_button(
+                    label=f"Download PDF ({pdf_path.name})",
+                    data=pdf_path.read_bytes(),
+                    file_name=pdf_path.name,
+                    mime="application/pdf",
+                    key=f"download_{c.chunk_id}",
+                )
+            else:
+                st.caption(f"Local file not found: {c.local_path}")
+
             st.text(c.text)
