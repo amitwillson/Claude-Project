@@ -83,6 +83,21 @@ def test_index_files_written_correctly(tmp_path):
         assert d["doc_type"] == "pdf"
 
 
+def test_section_path_uses_parent_link_text_not_generic_page_title(tmp_path):
+    # menu_100.html (and every other child page) shares the same generic
+    # <title>/<h1> "Ministry of Railways (Railway Board)" that every real
+    # page on the site uses. The breadcrumb must come from the *link text*
+    # on the parent page ("Commercial Circulars") instead, or every doc's
+    # section_path collapses into the same repeated generic string.
+    with MockSiteServer() as server:
+        scraper = IRCircularScraper(root_url=server.root_url, out_dir=tmp_path, delay=0)
+        records = scraper.crawl()
+
+    for r in records:
+        assert r.section_path == "Traffic Commercial Directorate > Commercial Circulars"
+        assert "Ministry of Railways (Railway Board) >" not in r.section_path
+
+
 def test_downloaded_files_exist_on_disk_with_correct_hash(tmp_path):
     import hashlib
 

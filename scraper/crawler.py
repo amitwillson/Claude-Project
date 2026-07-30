@@ -40,7 +40,7 @@ DOC_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx")
 class MenuNode:
     id: str
     url: str
-    breadcrumb: str  # human-readable path built up as we descend
+    breadcrumb: Optional[str]  # full path up to and including this node's own label; None only for the root, meaning "derive from this page's own title once fetched"
 
 
 def build_session(user_agent: str = USER_AGENT, total_retries: int = 5) -> requests.Session:
@@ -181,7 +181,10 @@ class IRCircularScraper:
 
     def crawl(self) -> list[DocumentRecord]:
         root_id = extract_menu_id(self.root_url) or "root"
-        queue: deque[MenuNode] = deque([MenuNode(id=root_id, url=self.root_url, breadcrumb="")])
+        # breadcrumb=None is a sentinel meaning "not yet known — compute
+        # from this page's own title/h1 once fetched" (only true for root;
+        # every other node's breadcrumb is fixed at enqueue time below).
+        queue: deque[MenuNode] = deque([MenuNode(id=root_id, url=self.root_url, breadcrumb=None)])
         docs_since_flush = 0
 
         try:
@@ -202,10 +205,13 @@ class IRCircularScraper:
                     continue
 
                 soup = BeautifulSoup(html, "html.parser")
-                page_title = self._page_title(soup, node)
-                breadcrumb = (
-                    f"{node.breadcrumb} > {page_title}".strip(" >") if node.breadcrumb else page_title
-                )
+                # Only the root's breadcrumb comes from the page's own
+                # title/h1 — every deeper node's breadcrumb was already
+                # fixed when it was enqueued, from the *parent* page's link
+                # text. gov.in pages typically share one generic <title>
+                # site-wide, so reading each child page's own title would
+                # collapse every section into the same repeated label.
+                breadcrumb = node.breadcrumb if node.breadcrumb is not None else self._page_title(soup, node)
 
                 sub_menus, docs = self._parse_links(soup, node.url)
                 logger.info(
@@ -223,13 +229,15 @@ class IRCircularScraper:
                         write_index(self.records, self.out_dir)
                         docs_since_flush = 0
 
-                for sub_id, sub_url in sub_menus:
+                for sub_id, sub_url, sub_label in sub_menus:
                     if sub_id in self.visited_menu_ids:
                         continue
                     if not self._in_scope(sub_id):
                         logger.info("SKIP out-of-scope menu id=%s url=%s", sub_id, sub_url)
                         continue
-                    queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=breadcrumb))
+                    label = sub_label or f"section-{sub_id}"
+                    child_breadcrumb = f"{breadcrumb} > {label}".strip(" >")
+                    queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=child_breadcrumb))
         finally:
             # Always persist whatever we have, even on KeyboardInterrupt or
             # an unexpected exception mid-crawl.
@@ -258,13 +266,16 @@ class IRCircularScraper:
 
     def _parse_links(
         self, soup: BeautifulSoup, page_url: str
-    ) -> tuple[list[tuple[str, str]], list[tuple[str, str, Optional[str]]]]:
+    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, Optional[str]]]]:
         """Return (sub_menu_links, document_links).
 
-        sub_menu_links: list of (menu_id, absolute_url)
+        sub_menu_links: list of (menu_id, absolute_url, link_text) — link_text
+        is this page's own label for that child section (used to build the
+        child's breadcrumb, since gov.in child pages don't reliably have
+        their own distinct <title>).
         document_links: list of (absolute_url, title, nearby_date_text)
         """
-        sub_menus: list[tuple[str, str]] = []
+        sub_menus: list[tuple[str, str, str]] = []
         docs: list[tuple[str, str, Optional[str]]] = []
 
         for a in soup.find_all("a", href=True):
@@ -282,7 +293,8 @@ class IRCircularScraper:
             if "view_section.jsp" in abs_url:
                 menu_id = extract_menu_id(abs_url)
                 if menu_id:
-                    sub_menus.append((menu_id, abs_url))
+                    link_text = a.get_text(strip=True)
+                    sub_menus.append((menu_id, abs_url, link_text))
 
         return sub_menus, docs
 
