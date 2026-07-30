@@ -83,16 +83,25 @@ def _extract_with_pdfplumber(path: Path) -> tuple[str, int]:
     return "\n\n".join(pages_text), page_count
 
 
+# Poppler/Tesseract can occasionally wedge indefinitely on a malformed or
+# unusually large PDF, with no default timeout -- one bad document would
+# otherwise hang an entire multi-thousand-document batch run forever.
+_RENDER_TIMEOUT_SECONDS = 300  # rendering all pages of one PDF to images
+_OCR_TIMEOUT_SECONDS = 60  # OCR-ing a single rendered page
+
+
 def _extract_with_ocr(path: Path) -> tuple[str, float]:
     """Render each PDF page to an image and OCR it with pytesseract."""
     import pytesseract
     from pdf2image import convert_from_path
 
-    images = convert_from_path(str(path))
+    images = convert_from_path(str(path), timeout=_RENDER_TIMEOUT_SECONDS)
     all_text = []
     confidences: list[float] = []
     for image in images:
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        data = pytesseract.image_to_data(
+            image, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
+        )
         page_words = []
         for i, word in enumerate(data.get("text", [])):
             word = word.strip()
