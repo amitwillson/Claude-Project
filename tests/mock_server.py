@@ -11,9 +11,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "mock_site"
 
 ID_TO_FILE = {
     "0,1,304,366,555": "menu_root.html",
-    "100": "menu_100.html",
-    "200": "menu_200.html",
-    "201": "menu_201.html",
+    "0,1,304,366,555,100": "menu_100.html",
+    "0,1,304,366,555,200": "menu_200.html",
+    "0,1,304,366,555,201": "menu_201.html",
 }
 
 

@@ -18,9 +18,27 @@ def test_crawl_discovers_all_documents_and_terminates(tmp_path):
     assert len(records) == 4
     assert all(r.download_ok for r in records)
 
-    # Menu recursion terminated: root, id=100 (visited once despite self-link),
-    # id=200, id=201 — 4 unique menu nodes, not infinite.
-    assert scraper.visited_menu_ids == {"0,1,304,366,555", "100", "200", "201"}
+    # Menu recursion terminated: root, id=...,100 (visited once despite
+    # self-link), id=...,200, id=...,201 — 4 unique menu nodes, not infinite.
+    assert scraper.visited_menu_ids == {
+        "0,1,304,366,555",
+        "0,1,304,366,555,100",
+        "0,1,304,366,555,200",
+        "0,1,304,366,555,201",
+    }
+
+
+def test_crawl_does_not_wander_into_other_directorates(tmp_path):
+    # menu_root.html links to id=0,5,1418,1459,2440 ("Personnel Promotion
+    # Orders"), a sibling directorate outside the root section's id prefix.
+    # The site's nav menu is shared across all directorates, so an unscoped
+    # BFS would wander there; the crawler must refuse to follow it.
+    with MockSiteServer() as server:
+        scraper = IRCircularScraper(root_url=server.root_url, out_dir=tmp_path, delay=0)
+        scraper.crawl()
+
+    assert "0,5,1418,1459,2440" not in scraper.visited_menu_ids
+    assert all(mid.startswith("0,1,304,366,555") for mid in scraper.visited_menu_ids)
 
 
 def test_crawl_dedup_by_id_visits_each_menu_once(tmp_path):

@@ -43,7 +43,7 @@ class MenuNode:
     breadcrumb: str  # human-readable path built up as we descend
 
 
-def build_session(user_agent: str = USER_AGENT) -> requests.Session:
+def build_session(user_agent: str = USER_AGENT, total_retries: int = 5) -> requests.Session:
     """A requests.Session configured with retry/backoff and a realistic UA."""
     session = requests.Session()
     session.headers.update(
@@ -53,7 +53,7 @@ def build_session(user_agent: str = USER_AGENT) -> requests.Session:
         }
     )
     retry = Retry(
-        total=5,
+        total=total_retries,
         backoff_factor=1.5,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=("GET", "HEAD"),
@@ -62,6 +62,22 @@ def build_session(user_agent: str = USER_AGENT) -> requests.Session:
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+HTTPS_ONLY_HOSTS = {"indianrailways.gov.in", "www.indianrailways.gov.in"}
+
+
+def normalize_scheme(url: str) -> str:
+    """Force http:// links to https:// on hosts known to no longer accept
+    plain-http connections. Many old circular links on this site are
+    hardcoded http://, but the server refuses connections on port 80, which
+    otherwise burns a full 5-retry exponential backoff (~30s+) per dead link
+    for no reason — https works. Scoped to the real site's host only, so it
+    doesn't interfere with local/test HTTP servers."""
+    parsed = urlparse(url)
+    if parsed.scheme == "http" and parsed.hostname in HTTPS_ONLY_HOSTS:
+        return parsed._replace(scheme="https").geturl()
+    return url
 
 
 def extract_menu_id(url: str) -> Optional[str]:
@@ -104,11 +120,16 @@ class IRCircularScraper:
         session: Optional[requests.Session] = None,
     ):
         self.root_url = root_url
+        self.root_id = extract_menu_id(root_url) or "root"
         self.out_dir = Path(out_dir)
         self.docs_dir = self.out_dir
         self.delay = delay
         self.max_pages = max_pages
         self.session = session or build_session()
+        # Document downloads are numerous and many old links are dead
+        # (http:// on a port that now refuses connections) — fail those
+        # fast instead of burning a full 5x backoff per link.
+        self.binary_session = session or build_session(total_retries=1)
 
         self.visited_menu_ids: set[str] = set()
         self.seen_doc_urls: set[str] = set()
@@ -134,9 +155,10 @@ class IRCircularScraper:
 
     def fetch_binary(self, url: str) -> Optional[tuple[bytes, int]]:
         """Fetch a binary document. Returns (content, status_code) or None."""
+        url = normalize_scheme(url)
         self._throttle()
         try:
-            resp = self.session.get(url, timeout=60)
+            resp = self.binary_session.get(url, timeout=60)
             resp.raise_for_status()
             return resp.content, resp.status_code
         except requests.RequestException as exc:
@@ -202,14 +224,29 @@ class IRCircularScraper:
                         docs_since_flush = 0
 
                 for sub_id, sub_url in sub_menus:
-                    if sub_id not in self.visited_menu_ids:
-                        queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=breadcrumb))
+                    if sub_id in self.visited_menu_ids:
+                        continue
+                    if not self._in_scope(sub_id):
+                        logger.info("SKIP out-of-scope menu id=%s url=%s", sub_id, sub_url)
+                        continue
+                    queue.append(MenuNode(id=sub_id, url=sub_url, breadcrumb=breadcrumb))
         finally:
             # Always persist whatever we have, even on KeyboardInterrupt or
             # an unexpected exception mid-crawl.
             write_index(self.records, self.out_dir)
 
         return self.records
+
+    def _in_scope(self, menu_id: str) -> bool:
+        """Menu ids are hierarchical, comma-separated node paths (e.g.
+        "0,1,304,366,555,999" is a child of "0,1,304,366,555"). The site's
+        nav menu is shared across every directorate, so an unscoped BFS
+        wanders into completely unrelated sections (Personnel, Vacancy
+        Circulars, etc.) — restrict the crawl to the root section's own
+        subtree."""
+        if menu_id == self.root_id:
+            return True
+        return menu_id.startswith(self.root_id + ",")
 
     def _page_title(self, soup: BeautifulSoup, node: MenuNode) -> str:
         if soup.title and soup.title.string:
