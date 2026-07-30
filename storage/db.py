@@ -97,9 +97,17 @@ def upsert_document(conn: sqlite3.Connection, doc: dict) -> None:
 
 def document_exists_with_sha1(conn: sqlite3.Connection, doc_id: str, sha1: Optional[str]) -> bool:
     """Used for incremental extraction: skip re-processing a document whose
-    sha1 hasn't changed since it was last indexed."""
-    row = conn.execute("SELECT sha1 FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
+    sha1 hasn't changed since it was last indexed AND whose extraction
+    previously succeeded cleanly (needs_review=0). A flagged document's file
+    hash doesn't change on retry, but the *environment* might (e.g. Poppler
+    getting installed) — so flagged documents are always retried rather than
+    skipped forever."""
+    row = conn.execute(
+        "SELECT sha1, needs_review FROM documents WHERE doc_id = ?", (doc_id,)
+    ).fetchone()
     if row is None:
+        return False
+    if row["needs_review"]:
         return False
     return sha1 is not None and row["sha1"] == sha1
 
