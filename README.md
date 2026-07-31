@@ -63,6 +63,12 @@ python -m extraction.run_extract --docs-dir documents
 # Addendum C — human-readable coverage report (discovered/downloaded/extracted/flagged).
 python storage/coverage_report.py
 
+# Optional — last-resort OCR for the small tail Tesseract still can't read
+# (uses the Anthropic API, so it costs a little money -- run this only after
+# the free pipeline above, and only against the documents still flagged).
+python -m extraction.claude_vision_ocr --dry-run   # preview candidates, no API calls
+python -m extraction.claude_vision_ocr             # actually transcribe them
+
 # Phase 3 — ask questions.
 python qa/ask.py "What is the current policy on refund of unused tickets?"
 python qa/ask.py "List all circulars on parcel booking" --exhaustive   # or just phrase it that way — auto-detected
@@ -94,9 +100,20 @@ documents whose SHA1 hasn't changed since the last run.
   conflicts/supersessions rather than silently pick one circular as current.
 - **OCR fallback**: PDFs whose native text layer looks empty or sparse
   (fewer than ~20 words/page) are re-processed with `pytesseract` +
-  `pdf2image`. Extraction quality (text-layer presence, word count vs. page
-  count, OCR confidence) is stored per document and outliers are written to
-  `needs_manual_review.md` after every extraction run.
+  `pdf2image`, page-by-page (so one bad/huge page doesn't cost the whole
+  document), at 300 DPI with grayscale/autocontrast preprocessing, and with
+  the Hindi (`hin`) language pack if installed alongside English. Extraction
+  quality (text-layer presence, word count vs. page count, OCR confidence)
+  is stored per document and outliers are written to `needs_manual_review.md`
+  after every extraction run. A document whose text still can't be extracted
+  at all is indexed with a placeholder chunk (title/date/section + a note
+  that OCR failed) rather than silently omitted, so it's still findable and
+  links back to the original PDF.
+- **`extraction/claude_vision_ocr.py`** (optional, costs a little API money):
+  a last-resort OCR pass for whatever's still flagged after the free
+  Tesseract pipeline above, using Claude's vision to transcribe each page
+  image. Deliberately a separate manual step, not run automatically, since
+  it's paid — see "Run order" above.
 - **Retrieval modes**: "specific" (default, vector top-N) vs. "exhaustive"
   (large candidate set + FTS5 keyword union), auto-triggered by phrasing like
   "list all" / "every circular" / "summarize all" / "all rules on", or
