@@ -89,18 +89,38 @@ def _extract_with_pdfplumber(path: Path) -> tuple[str, int]:
 _RENDER_TIMEOUT_SECONDS = 300  # rendering all pages of one PDF to images
 _OCR_TIMEOUT_SECONDS = 60  # OCR-ing a single rendered page
 
+# Some circulars are issued in Hindi (Devanagari script) or bilingually.
+# Tesseract only recognizes English by default; without the "hin" language
+# pack, Hindi text OCRs to near-nothing regardless of image quality. Detected
+# once per process and cached, since the Hindi traineddata may not be
+# installed on every machine -- fall back to English-only rather than
+# failing every OCR call.
+_ocr_lang_cache: Optional[str] = None
+
+
+def _ocr_lang(pytesseract_module) -> str:
+    global _ocr_lang_cache
+    if _ocr_lang_cache is None:
+        try:
+            available = pytesseract_module.get_languages()
+            _ocr_lang_cache = "eng+hin" if "hin" in available else "eng"
+        except Exception:
+            _ocr_lang_cache = "eng"
+    return _ocr_lang_cache
+
 
 def _extract_with_ocr(path: Path) -> tuple[str, float]:
     """Render each PDF page to an image and OCR it with pytesseract."""
     import pytesseract
     from pdf2image import convert_from_path
 
+    lang = _ocr_lang(pytesseract)
     images = convert_from_path(str(path), timeout=_RENDER_TIMEOUT_SECONDS)
     all_text = []
     confidences: list[float] = []
     for image in images:
         data = pytesseract.image_to_data(
-            image, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
+            image, lang=lang, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
         )
         page_words = []
         for i, word in enumerate(data.get("text", [])):
