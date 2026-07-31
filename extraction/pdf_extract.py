@@ -50,7 +50,7 @@ def extract_pdf_text(path: str | Path) -> ExtractionResult:
 
     # Sparse/empty text layer -> OCR fallback.
     try:
-        ocr_text, ocr_confidence = _extract_with_ocr(path)
+        ocr_text, ocr_confidence = _extract_with_ocr(path, page_count)
     except Exception as exc:
         # OCR unavailable/failed: return whatever native text we found, flagged.
         return ExtractionResult(
@@ -83,10 +83,15 @@ def _extract_with_pdfplumber(path: Path) -> tuple[str, int]:
     return "\n\n".join(pages_text), page_count
 
 
-# Poppler/Tesseract can occasionally wedge indefinitely on a malformed or
-# unusually large PDF, with no default timeout -- one bad document would
-# otherwise hang an entire multi-thousand-document batch run forever.
-_RENDER_TIMEOUT_SECONDS = 300  # rendering all pages of one PDF to images
+# Poppler/Tesseract can occasionally wedge indefinitely on a malformed page,
+# with no default timeout -- one bad page would otherwise hang an entire
+# multi-thousand-document batch run forever. Rendering and OCR-ing one page
+# at a time (rather than the whole document in one shot) means a genuinely
+# large document (100+ pages) just takes proportionally longer instead of
+# hitting one fixed cliff, while a single stuck/malformed page only costs
+# that page -- extraction continues with the rest of the document instead
+# of failing it entirely.
+_PAGE_RENDER_TIMEOUT_SECONDS = 60  # rendering a single page to an image
 _OCR_TIMEOUT_SECONDS = 60  # OCR-ing a single rendered page
 
 # Some circulars are issued in Hindi (Devanagari script) or bilingually.
@@ -109,19 +114,32 @@ def _ocr_lang(pytesseract_module) -> str:
     return _ocr_lang_cache
 
 
-def _extract_with_ocr(path: Path) -> tuple[str, float]:
-    """Render each PDF page to an image and OCR it with pytesseract."""
+def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
+    """Render each PDF page to an image and OCR it with pytesseract, one page
+    at a time. A page that fails to render or OCR in time is skipped (its
+    text stays empty) rather than aborting the whole document."""
     import pytesseract
     from pdf2image import convert_from_path
 
     lang = _ocr_lang(pytesseract)
-    images = convert_from_path(str(path), timeout=_RENDER_TIMEOUT_SECONDS)
     all_text = []
     confidences: list[float] = []
-    for image in images:
-        data = pytesseract.image_to_data(
-            image, lang=lang, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
-        )
+    for page_num in range(1, max(page_count, 1) + 1):
+        try:
+            images = convert_from_path(
+                str(path),
+                first_page=page_num,
+                last_page=page_num,
+                timeout=_PAGE_RENDER_TIMEOUT_SECONDS,
+            )
+            image = images[0]
+            data = pytesseract.image_to_data(
+                image, lang=lang, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
+            )
+        except Exception:
+            all_text.append("")  # this page timed out / failed to render -- skip it, keep going
+            continue
+
         page_words = []
         for i, word in enumerate(data.get("text", [])):
             word = word.strip()
