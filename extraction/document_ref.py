@@ -28,19 +28,23 @@ _HEAD_CHARS = 1500
 # e.g. "No. TC-I/2020/109/1", "F.No. TCR/1078/2019/2", "Ref. No. 45/2019",
 # "No.TCR-1078/2019/2-Part(1)". Requires at least one digit in the captured
 # token so common phrases like "No. of days" don't false-positive.
+# "N\s?o" tolerates the odd stray OCR space ("N o." for "No.") -- one of the
+# few OCR-noise patterns cheap enough to recover with regex tolerance;
+# noise inside the number itself (spaces splitting the reference token) is
+# not realistically recoverable this way and is left as a known limitation.
 _NUMBER_RE = re.compile(
     r"""
     (?:F\.?\s*)?
-    (?:No\.?|Ref\.?\s*No\.?|Number)\s*[:.]?\s*
+    (?:N\s?o\.?|Ref\.?\s*N\s?o\.?|Number)\s*[:.]?\s*
     (?P<number>(?=[A-Za-z0-9/_.\-()]*\d)[A-Za-z0-9][A-Za-z0-9/_.\-()]{2,40})
     """,
     re.IGNORECASE | re.VERBOSE,
 )
 
 # Government letterhead date line: "New Delhi, dated 23.03.2020",
-# "नई दिल्ली, दिनांक 23.03.2020", "Dated: 12th June 2019".
+# "New Delhi, dt.13.03.2026", "नई दिल्ली, दिनांक 23.03.2020", "Dated: 12th June 2019".
 _DATED_LINE_RE = re.compile(
-    r"(?:dated|dinank|दिनांक)\s*[:.,]?\s*"
+    r"(?:dated|\bdt\.?|dinank|दिनांक)\s*[:.,]?\s*"
     r"(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}\.?,?\s+\d{4})",
     re.IGNORECASE,
 )

@@ -45,3 +45,24 @@ def test_ignores_number_beyond_head_window():
     text = padding + "No. TC-I/2020/109/1 dated 23.03.2020"
     ref = detect_document_ref(text)
     assert ref.number is None
+
+
+def test_detects_dt_abbreviation_for_date():
+    text = "No.TC-I/2020/103/1\n\nNew Delhi, dt.13.03.2026"
+    ref = detect_document_ref(text)
+    assert ref.number == "TC-I/2020/103/1"
+    assert ref.date_parsed == "2026-03-13"
+
+
+def test_dt_does_not_false_match_inside_ordinary_words():
+    # "width" contains the substring "dt" but must not be treated as a date marker.
+    text = "The maximum width of the wagon shall not exceed 3.2 metres."
+    ref = detect_document_ref(text)
+    assert ref.date_raw is None
+
+
+def test_tolerates_stray_ocr_space_in_no():
+    text = "N o.TCR/1394/2022/PCC dt.12.06.2020"
+    ref = detect_document_ref(text)
+    assert ref.number == "TCR/1394/2022/PCC"
+    assert ref.date_parsed == "2020-06-12"
