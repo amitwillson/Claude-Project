@@ -219,6 +219,40 @@ section[data-testid="stSidebar"] {
     background: var(--bg-panel-solid);
     border-right: 1px solid rgba(255,255,255,0.06);
 }
+
+/* Catch-all: Streamlit's default widget/text colors assume a light theme,
+   so anything not already explicitly styled above renders dark-on-dark
+   against this page's background. Force the readable palette everywhere,
+   including inside the sidebar. More specific selectors above (buttons,
+   chips, citation cards) already use !important and still win. */
+.stApp, .stApp p, .stApp span, .stApp li, .stApp label, .stApp div,
+.stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown strong, .stMarkdown em, .stMarkdown a,
+h1, h2, h3, h4, h5, h6,
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
+[data-testid="stExpander"], [data-testid="stExpander"] p, [data-testid="stExpander"] summary,
+[data-testid="stExpanderDetails"], [data-testid="stExpanderDetails"] p,
+.stAlert, .stAlert p,
+section[data-testid="stSidebar"] * ,
+pre, code {
+    color: var(--text-primary) !important;
+}
+[data-testid="stExpander"] {
+    background: var(--bg-panel-solid) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 10px !important;
+}
+pre {
+    background: var(--bg-panel-solid) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+}
+[data-testid="stDownloadButton"] button {
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)) !important;
+    color: #05070c !important;
+    border: none !important;
+    font-weight: 600 !important;
+    border-radius: 10px !important;
+}
+a { color: var(--accent-cyan) !important; }
 </style>
 """,
     unsafe_allow_html=True,
