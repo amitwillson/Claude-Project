@@ -20,6 +20,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from extraction.chunker import chunk_text
+from extraction.document_ref import detect_document_ref
 from extraction.pdf_extract import ExtractionResult, _OCR_DPI, flag_extraction_outliers
 from extraction.run_extract import _write_manual_review_report
 from extraction.supersession import find_supersession_refs
@@ -171,12 +172,18 @@ def run(
         else:
             improved += 1
 
+        # Same preference as run_extract.py: the document's own letterhead
+        # is more authoritative than the scraped listing-page date.
+        ref = detect_document_ref(text)
+        date_raw = ref.date_raw or row["date_raw"]
+        date_parsed = ref.date_parsed or row["date_parsed"]
+
         doc_row = {
             "doc_id": row["doc_id"],
             "title": row["title"],
             "section_path": row["section_path"],
-            "date_raw": row["date_raw"],
-            "date_parsed": row["date_parsed"],
+            "date_raw": date_raw,
+            "date_parsed": date_parsed,
             "source_url": row["source_url"],
             "local_path": row["local_path"],
             "sha1": row["sha1"],
@@ -189,6 +196,7 @@ def run(
             "extraction_error": "Claude vision OCR: still low confidence" if needs_review else None,
             "needs_review": int(needs_review),
             "indexed_at": datetime.now(timezone.utc).isoformat(),
+            "document_number": ref.number,
         }
         storedb.upsert_document(conn, doc_row)
 
@@ -196,7 +204,7 @@ def run(
         indexable_text = pages if text.strip() else (
             f"[Claude vision OCR could not extract readable text from this document. "
             f"Title: {row['title']}. Section: {row['section_path']}. "
-            f"Date: {row['date_parsed'] or row['date_raw'] or 'unknown'}. "
+            f"Date: {date_parsed or date_raw or 'unknown'}. "
             f"Refer to the original PDF ({row['local_path']}) for its content.]"
         )
         chunks = chunk_text(
@@ -204,10 +212,11 @@ def run(
             doc_id=row["doc_id"],
             section_path=row["section_path"],
             title=row["title"],
-            date=row["date_parsed"] or row["date_raw"],
+            date=date_parsed or date_raw,
             source_url=row["source_url"],
             local_path=row["local_path"],
             doc_type=row["doc_type"],
+            circular_number=ref.number,
         )
         storedb.insert_chunks(conn, chunks)
 
@@ -229,6 +238,7 @@ def run(
                     "clause_ref": c.clause_ref or "",
                     "page_start": c.page_start or 0,
                     "page_end": c.page_end or 0,
+                    "circular_number": c.circular_number or "",
                 }
                 for c in chunks
             ]

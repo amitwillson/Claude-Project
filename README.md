@@ -95,6 +95,14 @@ documents whose SHA1 hasn't changed since the last run.
   citation isn't attempted, since extracted text doesn't reflow 1:1 with the
   visual PDF page (especially for OCR'd scans), so a literal line number
   wouldn't reliably match what's on the actual page.
+- **Notification/letter number + in-document date** (`extraction/document_ref.py`):
+  each document's own reference number and issue date are read directly
+  from its letterhead/reference line (e.g. "No. TC-I/2020/109/1", "New Delhi,
+  dated 23.03.2020"), which is more authoritative than the scraped
+  listing-page metadata and takes precedence over it when detected. Also
+  best-effort -- reference-number formats aren't standardized across
+  directorates/years (same caveat as `extraction/supersession.py`), so a
+  `None` result means "not detected," not "document has no number."
 - **Embeddings provider**: Anthropic's API does not currently offer a
   dedicated embeddings endpoint, so `storage/embeddings.py` defaults to a
   local, free, offline `sentence-transformers` model (`all-MiniLM-L6-v2`).
