@@ -41,23 +41,29 @@ st.markdown(
 
 :root {
     --bg-deep: #060911;
-    --bg-panel: rgba(18, 24, 38, 0.72);
-    --bg-panel-solid: #121826;
-    --border-glow: rgba(56, 189, 248, 0.25);
+    --bg-panel: rgba(24, 26, 46, 0.68);
+    --bg-panel-solid: #1a1d33;
+    --border-glow: rgba(56, 189, 248, 0.3);
     --accent-cyan: #38bdf8;
     --accent-blue: #3b82f6;
+    --accent-violet: #a855f7;
+    --accent-magenta: #ec4899;
+    --accent-teal: #2dd4bf;
     --accent-gold: #f2b134;
-    --text-primary: #e8edf5;
-    --text-muted: #8b96ab;
+    --text-primary: #f1f4fb;
+    --text-muted: #a3aec4;
 }
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
 .stApp {
     background:
-        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(59, 130, 246, 0.18), transparent),
-        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(56, 189, 248, 0.10), transparent),
-        var(--bg-deep);
+        radial-gradient(ellipse 70% 50% at 8% 0%, rgba(168, 85, 247, 0.35), transparent 60%),
+        radial-gradient(ellipse 60% 45% at 95% 8%, rgba(56, 189, 248, 0.32), transparent 60%),
+        radial-gradient(ellipse 65% 55% at 30% 100%, rgba(236, 72, 153, 0.22), transparent 60%),
+        radial-gradient(ellipse 60% 50% at 90% 95%, rgba(45, 212, 191, 0.22), transparent 60%),
+        linear-gradient(160deg, #171a2e 0%, #12142a 45%, #191231 100%);
+    background-attachment: fixed;
     color: var(--text-primary);
 }
 
@@ -71,9 +77,9 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     gap: 1.25rem;
     padding: 1.75rem 2rem;
     border-radius: 18px;
-    background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(56,189,248,0.05));
+    background: linear-gradient(120deg, rgba(168,85,247,0.22), rgba(56,189,248,0.14) 55%, rgba(45,212,191,0.12));
     border: 1px solid var(--border-glow);
-    box-shadow: 0 0 60px rgba(56, 189, 248, 0.08);
+    box-shadow: 0 0 60px rgba(168, 85, 247, 0.12);
     margin-bottom: 1.75rem;
 }
 .hero-mark {
@@ -128,6 +134,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     transition: border-color 0.2s ease;
 }
 .stat-card:hover { border-color: var(--border-glow); }
+.stat-card.c-cyan   { border-top: 2px solid var(--accent-cyan); }
+.stat-card.c-violet { border-top: 2px solid var(--accent-violet); }
+.stat-card.c-teal   { border-top: 2px solid var(--accent-teal); }
+.stat-card.c-gold   { border-top: 2px solid var(--accent-gold); }
 .stat-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.68rem;
@@ -142,8 +152,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     font-weight: 700;
     color: var(--text-primary);
 }
-.stat-value.accent { color: var(--accent-cyan); }
-.stat-value.warn { color: var(--accent-gold); }
+.stat-value.cyan   { color: var(--accent-cyan); }
+.stat-value.violet { color: var(--accent-violet); }
+.stat-value.teal   { color: var(--accent-teal); }
+.stat-value.gold   { color: var(--accent-gold); }
 
 /* ---- Answer panel ---- */
 .answer-panel {
@@ -266,21 +278,21 @@ total_docs, flagged_docs, sections_count, chunk_count, coverage_pct = _stats(con
 st.markdown(
     f"""
 <div class="stat-grid">
-  <div class="stat-card">
+  <div class="stat-card c-cyan">
     <div class="stat-label">Documents Indexed</div>
-    <div class="stat-value accent">{total_docs:,}</div>
+    <div class="stat-value cyan">{total_docs:,}</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card c-violet">
     <div class="stat-label">Searchable Chunks</div>
-    <div class="stat-value accent">{chunk_count:,}</div>
+    <div class="stat-value violet">{chunk_count:,}</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card c-teal">
     <div class="stat-label">Sections Covered</div>
-    <div class="stat-value">{sections_count:,}</div>
+    <div class="stat-value teal">{sections_count:,}</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card c-gold">
     <div class="stat-label">Extraction Coverage</div>
-    <div class="stat-value {'warn' if coverage_pct < 99 else 'accent'}">{coverage_pct}%</div>
+    <div class="stat-value gold">{coverage_pct}%</div>
   </div>
 </div>
 """,
