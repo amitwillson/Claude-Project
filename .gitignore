@@ -1,0 +1,27 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+venv/
+.venv/
+
+# Downloaded circulars & derived data (large, regenerable, environment-specific)
+documents/
+data/
+chroma_db/
+*.sqlite3
+*.db
+
+# Generated reports (regenerable artifacts)
+needs_manual_review.md
+coverage_report.md
+
+# OS/editor cruft
+.DS_Store
+*.swp

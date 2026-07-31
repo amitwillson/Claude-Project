@@ -1,0 +1,26 @@
+# --- Scraper ---
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+urllib3>=2.0.0
+
+# --- Extraction ---
+pypdf>=4.0.0
+pdfplumber>=0.11.0
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+
+# --- Storage / retrieval ---
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+
+# --- Q&A engine ---
+anthropic>=0.40.0
+streamlit>=1.38.0
+
+# --- Shared utilities ---
+python-dotenv>=1.0.0
+
+# --- Testing ---
+pytest>=8.0.0
