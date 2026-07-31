@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from typing import Optional
+
 from qa.retrieval import RetrievedChunk
 
 DEFAULT_MODEL = "claude-sonnet-5"
@@ -24,18 +26,24 @@ extrapolate.
 is not present in the excerpt, cite the title and date as printed instead. Never state \
 a policy without a citation.
 
-3. If multiple excerpts appear to conflict, or one excerpt states it supersedes, \
+3. Every excerpt is labeled with a Clause and Page (e.g. "Clause: 3.2", "Page: 2" or \
+"Pages: 2-3"). Whenever the excerpt has a clause number, include it in the citation, \
+e.g. "As per Commercial Circular No. 45 of 2019 dated 12.06.2019, Clause 3.2, page 2...". \
+If no clause number was detected for that excerpt, cite the page number alone \
+(e.g. "page 2"). If neither is available, cite circular/title/date only as in rule 2.
+
+4. If multiple excerpts appear to conflict, or one excerpt states it supersedes, \
 amends, or is issued "in partial modification of" another, surface that explicitly in \
 your answer rather than silently picking one as authoritative. Tell the user which \
 circular is more recent (by date) if that is determinable, and flag that supersession \
 detection is heuristic and the user may want to verify against the original documents.
 
-4. If asked to list/summarize many circulars, cover every relevant one shown in the \
+5. If asked to list/summarize many circulars, cover every relevant one shown in the \
 excerpts you were given -- do not stop at the first few.
 
-5. Be concise and precise. Do not editorialize beyond what the source text supports.
+6. Be concise and precise. Do not editorialize beyond what the source text supports.
 
-6. Some excerpts are placeholders beginning with "[No machine-readable text could be \
+7. Some excerpts are placeholders beginning with "[No machine-readable text could be \
 extracted from this document by OCR...]" -- this means a real, indexed circular exists \
 and is relevant by title/date/section, but its content could not be automatically read. \
 Tell the user such a circular appears relevant and point them to the original PDF; do \
@@ -51,6 +59,9 @@ class Citation:
     source_url: str
     local_path: str
     chunk_id: str
+    clause_ref: str = ""
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 
 @dataclass
@@ -61,6 +72,14 @@ class Answer:
     model: str
 
 
+def page_label(page_start: Optional[int], page_end: Optional[int]) -> str:
+    if not page_start:
+        return "unknown"
+    if page_end and page_end != page_start:
+        return f"{page_start}-{page_end}"
+    return str(page_start)
+
+
 def _format_context(chunks: list[RetrievedChunk]) -> str:
     blocks = []
     for i, c in enumerate(chunks, start=1):
@@ -69,6 +88,8 @@ def _format_context(chunks: list[RetrievedChunk]) -> str:
             f"Title: {c.title}\n"
             f"Date: {c.date or 'unknown'}\n"
             f"Section: {c.section_path}\n"
+            f"Clause: {c.clause_ref or 'none detected'}\n"
+            f"Page: {page_label(c.page_start, c.page_end)}\n"
             f"Source URL: {c.source_url}\n"
             f"---\n{c.text}\n"
         )
@@ -125,6 +146,9 @@ def answer_question(
             source_url=c.source_url,
             local_path=c.local_path,
             chunk_id=c.chunk_id,
+            clause_ref=c.clause_ref,
+            page_start=c.page_start,
+            page_end=c.page_end,
         )
         for c in chunks
     ]

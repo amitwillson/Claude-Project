@@ -83,6 +83,17 @@ documents whose SHA1 hasn't changed since the last run.
 
 ## Design notes & known limitations
 
+- **Clause/page citations**: chunks carry the PDF page(s) and clause/paragraph
+  number they came from (`extraction/chunker.py` detects leading numbering
+  like "3.2", "(a)", "(iii)" and carries it forward across continuation
+  paragraphs), and the Q&A engine cites them, e.g. "As per Commercial
+  Circular No. 45 of 2019 dated 12.06.2019, Clause 3.2, page 2...". This is
+  best-effort: not every circular uses consistent numbering, and OCR'd
+  scans may miss a clause marker if it wasn't recognized cleanly -- when no
+  clause number is detected, only the page number is cited. True line-level
+  citation isn't attempted, since extracted text doesn't reflow 1:1 with the
+  visual PDF page (especially for OCR'd scans), so a literal line number
+  wouldn't reliably match what's on the actual page.
 - **Embeddings provider**: Anthropic's API does not currently offer a
   dedicated embeddings endpoint, so `storage/embeddings.py` defaults to a
   local, free, offline `sentence-transformers` model (`all-MiniLM-L6-v2`).

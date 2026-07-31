@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     source_url TEXT,
     local_path TEXT,
     doc_type TEXT,
+    clause_ref TEXT,
+    page_start INTEGER,
+    page_end INTEGER,
     FOREIGN KEY (doc_id) REFERENCES documents(doc_id)
 );
 
@@ -74,7 +77,20 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS only helps brand-new databases -- an
+    existing chunks table (from before clause_ref/page_start/page_end were
+    added) needs these columns added in place so already-indexed data isn't
+    lost or requires a full re-extraction."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(chunks)")}
+    for column, coltype in (("clause_ref", "TEXT"), ("page_start", "INTEGER"), ("page_end", "INTEGER")):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE chunks ADD COLUMN {column} {coltype}")
+    conn.commit()
 
 
 def upsert_document(conn: sqlite3.Connection, doc: dict) -> None:
@@ -124,11 +140,13 @@ def insert_chunks(conn: sqlite3.Connection, chunks: Iterable) -> None:
     for c in chunks:
         conn.execute(
             """INSERT OR REPLACE INTO chunks
-               (chunk_id, doc_id, chunk_index, text, title, section_path, date, source_url, local_path, doc_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (chunk_id, doc_id, chunk_index, text, title, section_path, date, source_url, local_path, doc_type,
+                clause_ref, page_start, page_end)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.chunk_id, c.doc_id, c.chunk_index, c.text, c.title,
                 c.section_path, c.date, c.source_url, c.local_path, c.doc_type,
+                c.clause_ref, c.page_start, c.page_end,
             ),
         )
         conn.execute(

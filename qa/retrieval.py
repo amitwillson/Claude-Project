@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from typing import Optional
 
 SPECIFIC_TOP_N = 6
 EXHAUSTIVE_TOP_N = 40
@@ -33,6 +34,9 @@ class RetrievedChunk:
     local_path: str
     score: float
     source: str  # "vector" or "keyword"
+    clause_ref: str = ""
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 
 def is_exhaustive_query(question: str) -> bool:
@@ -78,6 +82,9 @@ def retrieve(
                     local_path=meta.get("local_path", ""),
                     score=score,
                     source="vector",
+                    clause_ref=meta.get("clause_ref", "") or "",
+                    page_start=meta.get("page_start") or None,
+                    page_end=meta.get("page_end") or None,
                 )
         except Exception:
             pass  # vector store unavailable -> fall through to keyword-only
@@ -98,6 +105,9 @@ def retrieve(
             local_path=row["local_path"] or "",
             score=0.0,
             source="keyword",
+            clause_ref=row["clause_ref"] or "" if "clause_ref" in row.keys() else "",
+            page_start=row["page_start"] if "page_start" in row.keys() else None,
+            page_end=row["page_end"] if "page_end" in row.keys() else None,
         )
 
     ordered = sorted(results.values(), key=lambda r: r.score, reverse=True)

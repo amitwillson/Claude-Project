@@ -69,10 +69,11 @@ def _render_page_png_base64(pdf_bytes: bytes, page_num: int) -> Optional[str]:
     return base64.standard_b64encode(buf.getvalue()).decode("ascii")
 
 
-def transcribe_document(path: Path, page_count: int, model: str, client) -> str:
+def transcribe_document(path: Path, page_count: int, model: str, client) -> list[str]:
     """Render each page and ask Claude to transcribe it. A page that fails
     to render or gets an API error is skipped (stays blank) rather than
-    aborting the whole document."""
+    aborting the whole document. Returns per-page text so chunking can still
+    tag clause/page citations, same as the Tesseract path."""
     n_pages = min(max(page_count, 1), MAX_PAGES_PER_DOC)
     pdf_bytes = path.read_bytes()
     all_text = []
@@ -103,7 +104,7 @@ def transcribe_document(path: Path, page_count: int, model: str, client) -> str:
         except Exception as exc:
             logger.warning("Vision OCR failed for %s page %d: %s", path, page_num, exc)
             all_text.append("")
-    return "\n\n".join(all_text)
+    return all_text
 
 
 def run(
@@ -156,7 +157,8 @@ def run(
             continue
 
         page_count = row["page_count"] or 1
-        text = transcribe_document(local_path, page_count, model, client)
+        pages = transcribe_document(local_path, page_count, model, client)
+        text = "\n\n".join(pages)
         word_count = len(text.split())
 
         result = ExtractionResult(
@@ -191,7 +193,7 @@ def run(
         storedb.upsert_document(conn, doc_row)
 
         storedb.delete_chunks_for_doc(conn, row["doc_id"])
-        indexable_text = text.strip() or (
+        indexable_text = pages if text.strip() else (
             f"[Claude vision OCR could not extract readable text from this document. "
             f"Title: {row['title']}. Section: {row['section_path']}. "
             f"Date: {row['date_parsed'] or row['date_raw'] or 'unknown'}. "
@@ -224,6 +226,9 @@ def run(
                     "source_url": c.source_url,
                     "local_path": c.local_path or "",
                     "chunk_index": c.chunk_index,
+                    "clause_ref": c.clause_ref or "",
+                    "page_start": c.page_start or 0,
+                    "page_end": c.page_end or 0,
                 }
                 for c in chunks
             ]

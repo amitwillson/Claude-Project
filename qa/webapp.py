@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 from dotenv import load_dotenv
 
-from qa.answer import answer_question
+from qa.answer import answer_question, page_label
 from qa.retrieval import retrieve
 from storage import db as storedb
 
@@ -81,6 +81,7 @@ if submitted and question.strip():
     for i, c in enumerate(chunks, start=1):
         with st.expander(f"{i}. {c.title} — {c.date or 'unknown date'} ({c.source})"):
             st.write(f"**Section:** {c.section_path}")
+            st.write(f"**Clause:** {c.clause_ref or 'none detected'} — **Page:** {page_label(c.page_start, c.page_end)}")
             st.markdown(f"**Source URL:** [{c.source_url}]({c.source_url})")
 
             pdf_path = Path(c.local_path) if c.local_path else None

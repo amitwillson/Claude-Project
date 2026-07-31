@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
-from qa.answer import answer_question
+from qa.answer import answer_question, page_label
 from qa.retrieval import retrieve
 from storage import db as storedb
 
@@ -56,6 +56,7 @@ def main(argv=None) -> int:
         print("(none)")
     for i, c in enumerate(answer.citations, start=1):
         print(f"{i}. {c.title} — {c.date or 'unknown date'} — {c.section_path}")
+        print(f"   Clause: {c.clause_ref or 'none detected'} — Page: {page_label(c.page_start, c.page_end)}")
         print(f"   Source: {c.source_url}")
         print(f"   Local PDF: {c.local_path}")
 

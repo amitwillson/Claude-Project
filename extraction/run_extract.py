@@ -23,7 +23,10 @@ logger = logging.getLogger("extraction.run_extract")
 
 
 def extract_document(local_path: Path, doc_type: str):
-    """Returns (text, quality_dict) for a single document."""
+    """Returns (text, quality_dict) for a single document. quality_dict["pages"]
+    is a list of per-page text when available (PDFs), enabling clause/page
+    citation in chunking; falls back to None for formats without page
+    boundaries (chunk_text treats a plain string as a single page)."""
     if doc_type == "pdf":
         result = extract_pdf_text(local_path)
         needs_review = flag_extraction_outliers(result)
@@ -35,6 +38,7 @@ def extract_document(local_path: Path, doc_type: str):
             "page_count": result.page_count,
             "extraction_error": result.error,
             "needs_review": needs_review,
+            "pages": result.pages,
         }
 
     if doc_type in ("docx", "xlsx", "xls", "doc"):
@@ -48,6 +52,7 @@ def extract_document(local_path: Path, doc_type: str):
             "page_count": None,
             "extraction_error": result.error,
             "needs_review": needs_review,
+            "pages": None,
         }
 
     return "", {
@@ -58,6 +63,7 @@ def extract_document(local_path: Path, doc_type: str):
         "page_count": None,
         "extraction_error": f"unsupported doc_type: {doc_type}",
         "needs_review": True,
+        "pages": None,
     }
 
 
@@ -132,7 +138,7 @@ def run(docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = Fa
         # that says so explicitly, so retrieval can still surface it and
         # point back to the original PDF rather than silently omitting it.
         is_placeholder = not text.strip()
-        indexable_text = text
+        indexable_text = quality.get("pages") or text
         if is_placeholder:
             indexable_text = (
                 f"[No machine-readable text could be extracted from this document by OCR. "
@@ -168,6 +174,9 @@ def run(docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = Fa
                     "source_url": c.source_url,
                     "local_path": c.local_path or "",
                     "chunk_index": c.chunk_index,
+                    "clause_ref": c.clause_ref or "",
+                    "page_start": c.page_start or 0,
+                    "page_end": c.page_end or 0,
                 }
                 for c in chunks
             ]

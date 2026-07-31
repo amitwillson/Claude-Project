@@ -1,4 +1,4 @@
-from extraction.chunker import chunk_text, split_into_paragraphs
+from extraction.chunker import chunk_text, detect_clause_ref, split_into_paragraphs
 
 COMMON_KWARGS = dict(
     doc_id="doc123",
@@ -81,3 +81,34 @@ def test_small_document_produces_single_chunk():
     chunks = chunk_text(text=text, **COMMON_KWARGS)
     assert len(chunks) == 1
     assert chunks[0].chunk_index == 0
+
+
+def test_detect_clause_ref_common_formats():
+    assert detect_clause_ref("1. The following shall apply.") == "1"
+    assert detect_clause_ref("3.2 Refund procedure is as follows.") == "3.2"
+    assert detect_clause_ref("(a) subject to conditions.") == "(a)"
+    assert detect_clause_ref("(iii) further provided that.") == "(iii)"
+    assert detect_clause_ref("Clause 5.1 states the rate.") == "5.1"
+    assert detect_clause_ref("This is a normal sentence with no number.") is None
+
+
+def test_chunk_text_tags_page_and_clause_from_page_list():
+    pages = [
+        "1. Introductory clause on page one.\n\n2. Second clause on page one.",
+        "2. (continued) Second clause continues onto page two.\n\n3. Third clause starts on page two.",
+    ]
+    chunks = chunk_text(text=pages, **COMMON_KWARGS)
+
+    assert len(chunks) == 1  # short enough to stay one chunk
+    c = chunks[0]
+    assert c.page_start == 1
+    assert c.page_end == 2
+    assert c.clause_ref == "1"  # first paragraph's own clause number
+
+
+def test_chunk_text_plain_string_treated_as_single_page():
+    chunks = chunk_text(text="1. Some clause text here.", **COMMON_KWARGS)
+    assert len(chunks) == 1
+    assert chunks[0].page_start == 1
+    assert chunks[0].page_end == 1
+    assert chunks[0].clause_ref == "1"

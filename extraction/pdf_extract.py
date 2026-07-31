@@ -6,7 +6,7 @@
 # installed yet.
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +24,10 @@ class ExtractionResult:
     ocr_used: bool
     ocr_confidence: Optional[float] = None  # average OCR confidence 0-100, if OCR used
     error: Optional[str] = None
+    # Per-page text, in page order (1-indexed implicitly by position). Lets
+    # the chunker tag each chunk with the PDF page(s) and clause number it
+    # came from, so citations can point to an exact page, not just a title.
+    pages: list[str] = field(default_factory=list)
 
 
 def extract_pdf_text(path: str | Path) -> ExtractionResult:
@@ -31,13 +35,14 @@ def extract_pdf_text(path: str | Path) -> ExtractionResult:
     text layer looks empty/sparse (common in scanned older circulars)."""
     path = Path(path)
     try:
-        text, page_count = _extract_with_pdfplumber(path)
+        pages, page_count = _extract_with_pdfplumber(path)
     except Exception as exc:  # pdfplumber/pypdf missing or file unreadable
         return ExtractionResult(
             text="", page_count=0, word_count=0, has_text_layer=False,
-            ocr_used=False, error=f"native extraction failed: {exc}",
+            ocr_used=False, error=f"native extraction failed: {exc}", pages=[],
         )
 
+    text = "\n\n".join(pages)
     word_count = len(text.split())
     words_per_page = word_count / page_count if page_count else 0
     has_text_layer = words_per_page >= MIN_WORDS_PER_PAGE_FOR_TEXT_LAYER
@@ -45,34 +50,37 @@ def extract_pdf_text(path: str | Path) -> ExtractionResult:
     if has_text_layer:
         return ExtractionResult(
             text=text, page_count=page_count, word_count=word_count,
-            has_text_layer=True, ocr_used=False,
+            has_text_layer=True, ocr_used=False, pages=pages,
         )
 
     # Sparse/empty text layer -> OCR fallback.
     try:
-        ocr_text, ocr_confidence = _extract_with_ocr(path, page_count)
+        ocr_pages, ocr_confidence = _extract_with_ocr(path, page_count)
     except Exception as exc:
         # OCR unavailable/failed: return whatever native text we found, flagged.
         return ExtractionResult(
             text=text, page_count=page_count, word_count=word_count,
             has_text_layer=False, ocr_used=False,
-            error=f"OCR fallback failed: {exc}",
+            error=f"OCR fallback failed: {exc}", pages=pages,
         )
 
+    ocr_text = "\n\n".join(ocr_pages)
     ocr_word_count = len(ocr_text.split())
     if ocr_word_count > word_count:
         return ExtractionResult(
             text=ocr_text, page_count=page_count, word_count=ocr_word_count,
             has_text_layer=False, ocr_used=True, ocr_confidence=ocr_confidence,
+            pages=ocr_pages,
         )
     # OCR didn't help; keep the native (possibly empty) text but note OCR ran.
     return ExtractionResult(
         text=text, page_count=page_count, word_count=word_count,
         has_text_layer=False, ocr_used=True, ocr_confidence=ocr_confidence,
+        pages=pages,
     )
 
 
-def _extract_with_pdfplumber(path: Path) -> tuple[str, int]:
+def _extract_with_pdfplumber(path: Path) -> tuple[list[str], int]:
     import pdfplumber
 
     pages_text = []
@@ -80,7 +88,7 @@ def _extract_with_pdfplumber(path: Path) -> tuple[str, int]:
         page_count = len(pdf.pages)
         for page in pdf.pages:
             pages_text.append(page.extract_text() or "")
-    return "\n\n".join(pages_text), page_count
+    return pages_text, page_count
 
 
 # Poppler/Tesseract can occasionally wedge indefinitely on a malformed page,
@@ -138,7 +146,7 @@ def _preprocess_for_ocr(image):
     return ImageOps.autocontrast(gray)
 
 
-def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
+def _extract_with_ocr(path: Path, page_count: int) -> tuple[list[str], float]:
     """Render each PDF page to an image and OCR it with pytesseract, one page
     at a time. A page that fails to render or OCR in time is skipped (its
     text stays empty) rather than aborting the whole document."""
@@ -185,7 +193,7 @@ def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
                 pass
         all_text.append(" ".join(page_words))
     avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-    return "\n\n".join(all_text), avg_conf
+    return all_text, avg_conf
 
 
 def flag_extraction_outliers(result: ExtractionResult, words_per_page_threshold: int = 30) -> bool:
