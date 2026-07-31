@@ -114,6 +114,22 @@ def _ocr_lang(pytesseract_module) -> str:
     return _ocr_lang_cache
 
 
+# Poppler's default render DPI (~200) is often too low to recognize small
+# print or faded old scans; rendering sharper images gives Tesseract more
+# pixels per character to work with.
+_OCR_DPI = 300
+
+
+def _preprocess_for_ocr(image):
+    """Grayscale + autocontrast before OCR -- cheap, no extra dependencies
+    (PIL ships with pdf2image), and frequently recovers faded/low-contrast
+    scans that Tesseract otherwise reads as blank or garbled."""
+    from PIL import ImageOps
+
+    gray = image.convert("L")
+    return ImageOps.autocontrast(gray)
+
+
 def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
     """Render each PDF page to an image and OCR it with pytesseract, one page
     at a time. A page that fails to render or OCR in time is skipped (its
@@ -130,9 +146,10 @@ def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
                 str(path),
                 first_page=page_num,
                 last_page=page_num,
+                dpi=_OCR_DPI,
                 timeout=_PAGE_RENDER_TIMEOUT_SECONDS,
             )
-            image = images[0]
+            image = _preprocess_for_ocr(images[0])
             data = pytesseract.image_to_data(
                 image, lang=lang, output_type=pytesseract.Output.DICT, timeout=_OCR_TIMEOUT_SECONDS
             )
