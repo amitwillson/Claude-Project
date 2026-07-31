@@ -74,7 +74,13 @@ CREATE TABLE IF NOT EXISTS supersession_refs (
 def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    # check_same_thread=False: Streamlit's UI (qa/webapp.py, qa/dashboard.py)
+    # caches this connection with @st.cache_resource across reruns, but
+    # Streamlit can execute a rerun on a different internal thread than the
+    # one that created the connection -- sqlite3 refuses cross-thread use by
+    # default. Safe here since this app never writes concurrently from
+    # multiple threads; SQLite itself serializes access within a connection.
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _migrate(conn)
