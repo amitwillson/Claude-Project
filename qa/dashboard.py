@@ -90,7 +90,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border-radius: 16px;
     display: flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-    color: #05070c;
+    color: #05070c !important;
     box-shadow: 0 0 30px rgba(56, 189, 248, 0.45);
     flex-shrink: 0;
 }
@@ -99,7 +99,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.72rem;
     letter-spacing: 0.18em;
-    color: var(--accent-gold);
+    color: var(--accent-gold) !important;
     text-transform: uppercase;
     margin-bottom: 0.15rem;
 }
@@ -110,7 +110,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     background: linear-gradient(90deg, #ffffff, var(--accent-cyan) 70%);
     -webkit-background-clip: text;
     background-clip: text;
-    color: transparent;
+    color: transparent !important;
     margin: 0.1rem 0;
 }
 .hero-slogan {
@@ -118,10 +118,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     font-style: italic;
     font-weight: 500;
     font-size: 0.98rem;
-    color: var(--text-muted);
+    color: var(--text-muted) !important;
     letter-spacing: 0.01em;
 }
-.hero-slogan b { color: var(--accent-gold); font-style: normal; }
+.hero-slogan b { color: var(--accent-gold) !important; font-style: normal; }
 
 /* ---- Stat cards ---- */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin-bottom: 1.75rem; }
@@ -143,19 +143,19 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     font-size: 0.68rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--text-muted);
+    color: var(--text-muted) !important;
     margin-bottom: 0.35rem;
 }
 .stat-value {
     font-family: 'Space Grotesk', sans-serif;
     font-size: 1.65rem;
     font-weight: 700;
-    color: var(--text-primary);
+    color: var(--text-primary) !important;
 }
-.stat-value.cyan   { color: var(--accent-cyan); }
-.stat-value.violet { color: var(--accent-violet); }
-.stat-value.teal   { color: var(--accent-teal); }
-.stat-value.gold   { color: var(--accent-gold); }
+.stat-value.cyan   { color: var(--accent-cyan) !important; }
+.stat-value.violet { color: var(--accent-violet) !important; }
+.stat-value.teal   { color: var(--accent-teal) !important; }
+.stat-value.gold   { color: var(--accent-gold) !important; }
 
 /* ---- Answer panel ---- */
 .answer-panel {
@@ -177,7 +177,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     padding: 0.25rem 0.6rem;
     border-radius: 999px;
     background: rgba(56, 189, 248, 0.12);
-    color: var(--accent-cyan);
+    color: var(--accent-cyan) !important;
     border: 1px solid rgba(56, 189, 248, 0.35);
     margin-right: 0.5rem;
 }
@@ -190,14 +190,14 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     padding: 0.9rem 1.1rem;
     margin-bottom: 0.6rem;
 }
-.citation-title { font-weight: 600; color: var(--text-primary); font-size: 0.95rem; }
+.citation-title { font-weight: 600; color: var(--text-primary) !important; font-size: 0.95rem; }
 .citation-meta {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.72rem;
-    color: var(--accent-gold);
+    color: var(--accent-gold) !important;
     margin-top: 0.2rem;
 }
-.citation-section { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.15rem; }
+.citation-section { color: var(--text-muted) !important; font-size: 0.8rem; margin-top: 0.15rem; }
 
 /* Streamlit widget restyle */
 .stTextInput input {
@@ -207,7 +207,13 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border-radius: 10px !important;
     font-size: 1rem !important;
 }
-.stButton button {
+.stButton button,
+[data-testid="stFormSubmitButton"] button,
+[data-testid^="stBaseButton"],
+button[kind="primary"],
+button[kind="secondary"],
+button[kind="primaryFormSubmit"],
+button[kind="secondaryFormSubmit"] {
     background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)) !important;
     color: #05070c !important;
     border: none !important;
@@ -253,6 +259,23 @@ pre {
     border-radius: 10px !important;
 }
 a { color: var(--accent-cyan) !important; }
+
+/* The catch-all above recolors every nested span/div light, including
+   text inside the Ask/Download buttons' own gradient backgrounds -- that
+   leaves near-invisible light-on-light text. Force it back to dark inside
+   any button, using both class- and attribute-based selectors since
+   Streamlit's exact DOM/class names have changed across versions. Placed
+   last so it wins same-specificity cascade ties. */
+.stButton button, .stButton button *,
+[data-testid="stDownloadButton"] button, [data-testid="stDownloadButton"] button *,
+[data-testid="stFormSubmitButton"] button, [data-testid="stFormSubmitButton"] button *,
+[data-testid^="stBaseButton"], [data-testid^="stBaseButton"] *,
+button[kind="primary"], button[kind="primary"] *,
+button[kind="secondary"], button[kind="secondary"] *,
+button[kind="primaryFormSubmit"], button[kind="primaryFormSubmit"] *,
+button[kind="secondaryFormSubmit"], button[kind="secondaryFormSubmit"] * {
+    color: #05070c !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
