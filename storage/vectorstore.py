@@ -55,3 +55,20 @@ class VectorStore:
 
     def count(self) -> int:
         return self._collection.count()
+
+    def update_metadata(self, chunk_ids: Sequence[str], updates: dict) -> None:
+        """Merge `updates` into each chunk's existing metadata, without
+        touching its embedding or document text. Chroma's update() takes a
+        full metadata dict per id rather than a partial patch, so this
+        fetches the current metadata first and merges in `updates` to avoid
+        clobbering fields not being changed here (e.g. backfilling
+        circular_number shouldn't wipe out clause_ref/page_start)."""
+        if not chunk_ids:
+            return
+        existing = self._collection.get(ids=list(chunk_ids), include=["metadatas"])
+        ids = existing.get("ids", [])
+        metas = existing.get("metadatas", [])
+        if not ids:
+            return
+        merged = [{**(meta or {}), **updates} for meta in metas]
+        self._collection.update(ids=ids, metadatas=merged)

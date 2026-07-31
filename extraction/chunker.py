@@ -47,6 +47,7 @@ class Chunk:
     clause_ref: Optional[str] = None
     page_start: Optional[int] = None
     page_end: Optional[int] = None
+    circular_number: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -99,6 +100,7 @@ def chunk_text(
     source_url: str,
     local_path: Optional[str],
     doc_type: str = "",
+    circular_number: Optional[str] = None,
     min_words: int = TARGET_MIN_WORDS,
     max_words: int = TARGET_MAX_WORDS,
 ) -> list[Chunk]:
@@ -140,6 +142,7 @@ def chunk_text(
                 clause_ref=buffer[0].clause_ref,
                 page_start=min(pages_in_chunk),
                 page_end=max(pages_in_chunk),
+                circular_number=circular_number,
             )
         )
         index += 1
@@ -176,6 +179,7 @@ def chunk_text(
                         clause_ref=tp.clause_ref,
                         page_start=tp.page_number,
                         page_end=tp.page_number,
+                        circular_number=circular_number,
                     )
                 )
                 index += 1

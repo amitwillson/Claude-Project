@@ -81,6 +81,7 @@ if submitted and question.strip():
     for i, c in enumerate(chunks, start=1):
         with st.expander(f"{i}. {c.title} — {c.date or 'unknown date'} ({c.source})"):
             st.write(f"**Section:** {c.section_path}")
+            st.write(f"**Notification/Letter No.:** {c.circular_number or 'not detected'}")
             st.write(f"**Clause:** {c.clause_ref or 'none detected'} — **Page:** {page_label(c.page_start, c.page_end)}")
             st.markdown(f"**Source URL:** [{c.source_url}]({c.source_url})")
 

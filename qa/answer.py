@@ -22,9 +22,11 @@ If the excerpts do not clearly answer the question, say so explicitly: \
 extrapolate.
 
 2. ALWAYS cite the exact circular number/title and date for every claim, in the form: \
-"As per Commercial Circular No. 45 of 2019 dated 12.06.2019...". If a circular number \
-is not present in the excerpt, cite the title and date as printed instead. Never state \
-a policy without a citation.
+"As per Commercial Circular No. 45 of 2019 dated 12.06.2019...". Each excerpt is \
+labeled with a "Notification/Letter No." detected directly from the document itself, \
+which is the most authoritative source for the circular's own number -- prefer it over \
+a number merely mentioned in the title when both are present. If neither is available, \
+cite the title and date as printed instead. Never state a policy without a citation.
 
 3. Every excerpt is labeled with a Clause and Page (e.g. "Clause: 3.2", "Page: 2" or \
 "Pages: 2-3"). Whenever the excerpt has a clause number, include it in the citation, \
@@ -62,6 +64,7 @@ class Citation:
     clause_ref: str = ""
     page_start: Optional[int] = None
     page_end: Optional[int] = None
+    circular_number: str = ""
 
 
 @dataclass
@@ -87,6 +90,7 @@ def _format_context(chunks: list[RetrievedChunk]) -> str:
             f"[Excerpt {i}]\n"
             f"Title: {c.title}\n"
             f"Date: {c.date or 'unknown'}\n"
+            f"Notification/Letter No.: {c.circular_number or 'not detected'}\n"
             f"Section: {c.section_path}\n"
             f"Clause: {c.clause_ref or 'none detected'}\n"
             f"Page: {page_label(c.page_start, c.page_end)}\n"
@@ -149,6 +153,7 @@ def answer_question(
             clause_ref=c.clause_ref,
             page_start=c.page_start,
             page_end=c.page_end,
+            circular_number=c.circular_number,
         )
         for c in chunks
     ]

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS documents (
     page_count INTEGER,
     extraction_error TEXT,
     needs_review INTEGER DEFAULT 0,
-    indexed_at TEXT
+    indexed_at TEXT,
+    document_number TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     clause_ref TEXT,
     page_start INTEGER,
     page_end INTEGER,
+    circular_number TEXT,
     FOREIGN KEY (doc_id) REFERENCES documents(doc_id)
 );
 
@@ -89,13 +91,22 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """CREATE TABLE IF NOT EXISTS only helps brand-new databases -- an
-    existing chunks table (from before clause_ref/page_start/page_end were
-    added) needs these columns added in place so already-indexed data isn't
-    lost or requires a full re-extraction."""
-    existing = {row["name"] for row in conn.execute("PRAGMA table_info(chunks)")}
-    for column, coltype in (("clause_ref", "TEXT"), ("page_start", "INTEGER"), ("page_end", "INTEGER")):
-        if column not in existing:
+    existing table (from before a column was added) needs it added in place
+    so already-indexed data isn't lost or requires a full re-extraction."""
+    existing_chunks = {row["name"] for row in conn.execute("PRAGMA table_info(chunks)")}
+    for column, coltype in (
+        ("clause_ref", "TEXT"),
+        ("page_start", "INTEGER"),
+        ("page_end", "INTEGER"),
+        ("circular_number", "TEXT"),
+    ):
+        if column not in existing_chunks:
             conn.execute(f"ALTER TABLE chunks ADD COLUMN {column} {coltype}")
+
+    existing_documents = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+    if "document_number" not in existing_documents:
+        conn.execute("ALTER TABLE documents ADD COLUMN document_number TEXT")
+
     conn.commit()
 
 
@@ -104,7 +115,7 @@ def upsert_document(conn: sqlite3.Connection, doc: dict) -> None:
         "doc_id", "title", "section_path", "date_raw", "date_parsed",
         "source_url", "local_path", "sha1", "doc_type", "has_text_layer",
         "ocr_used", "ocr_confidence", "word_count", "page_count",
-        "extraction_error", "needs_review", "indexed_at",
+        "extraction_error", "needs_review", "indexed_at", "document_number",
     ]
     values = [doc.get(f) for f in fields]
     placeholders = ", ".join("?" for _ in fields)
@@ -147,12 +158,12 @@ def insert_chunks(conn: sqlite3.Connection, chunks: Iterable) -> None:
         conn.execute(
             """INSERT OR REPLACE INTO chunks
                (chunk_id, doc_id, chunk_index, text, title, section_path, date, source_url, local_path, doc_type,
-                clause_ref, page_start, page_end)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                clause_ref, page_start, page_end, circular_number)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.chunk_id, c.doc_id, c.chunk_index, c.text, c.title,
                 c.section_path, c.date, c.source_url, c.local_path, c.doc_type,
-                c.clause_ref, c.page_start, c.page_end,
+                c.clause_ref, c.page_start, c.page_end, c.circular_number,
             ),
         )
         conn.execute(

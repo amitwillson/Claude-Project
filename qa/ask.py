@@ -56,6 +56,7 @@ def main(argv=None) -> int:
         print("(none)")
     for i, c in enumerate(answer.citations, start=1):
         print(f"{i}. {c.title} — {c.date or 'unknown date'} — {c.section_path}")
+        print(f"   Notification/Letter No.: {c.circular_number or 'not detected'}")
         print(f"   Clause: {c.clause_ref or 'none detected'} — Page: {page_label(c.page_start, c.page_end)}")
         print(f"   Source: {c.source_url}")
         print(f"   Local PDF: {c.local_path}")

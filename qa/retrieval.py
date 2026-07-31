@@ -37,6 +37,7 @@ class RetrievedChunk:
     clause_ref: str = ""
     page_start: Optional[int] = None
     page_end: Optional[int] = None
+    circular_number: str = ""
 
 
 def is_exhaustive_query(question: str) -> bool:
@@ -85,6 +86,7 @@ def retrieve(
                     clause_ref=meta.get("clause_ref", "") or "",
                     page_start=meta.get("page_start") or None,
                     page_end=meta.get("page_end") or None,
+                    circular_number=meta.get("circular_number", "") or "",
                 )
         except Exception:
             pass  # vector store unavailable -> fall through to keyword-only
@@ -108,6 +110,7 @@ def retrieve(
             clause_ref=row["clause_ref"] or "" if "clause_ref" in row.keys() else "",
             page_start=row["page_start"] if "page_start" in row.keys() else None,
             page_end=row["page_end"] if "page_end" in row.keys() else None,
+            circular_number=row["circular_number"] or "" if "circular_number" in row.keys() else "",
         )
 
     ordered = sorted(results.values(), key=lambda r: r.score, reverse=True)

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from extraction.chunker import chunk_text
+from extraction.document_ref import detect_document_ref
 from extraction.office_extract import extract_office_text
 from extraction.pdf_extract import extract_pdf_text, flag_extraction_outliers
 from extraction.supersession import find_supersession_refs
@@ -103,12 +104,21 @@ def run(
         text, quality = extract_document(local_path, rec.doc_type)
         processed += 1
 
+        # The document's own letterhead/reference line (read directly from
+        # its extracted text) is a more authoritative source for the
+        # notification/letter number and issue date than the scraped
+        # listing-page metadata -- prefer it when detected, fall back to the
+        # scraped values otherwise. See extraction/document_ref.py.
+        ref = detect_document_ref(text)
+        date_raw = ref.date_raw or rec.date_raw
+        date_parsed = ref.date_parsed or rec.date_parsed
+
         doc_row = {
             "doc_id": rec.doc_id,
             "title": rec.title,
             "section_path": rec.section_path,
-            "date_raw": rec.date_raw,
-            "date_parsed": rec.date_parsed,
+            "date_raw": date_raw,
+            "date_parsed": date_parsed,
             "source_url": rec.source_url,
             "local_path": rec.local_path,
             "sha1": rec.sha1,
@@ -121,6 +131,7 @@ def run(
             "extraction_error": quality["extraction_error"],
             "needs_review": int(quality["needs_review"]),
             "indexed_at": datetime.now(timezone.utc).isoformat(),
+            "document_number": ref.number,
         }
         storedb.upsert_document(conn, doc_row)
 
@@ -154,10 +165,11 @@ def run(
             doc_id=rec.doc_id,
             section_path=rec.section_path,
             title=rec.title,
-            date=rec.date_parsed or rec.date_raw,
+            date=date_parsed or date_raw,
             source_url=rec.source_url,
             local_path=rec.local_path,
             doc_type=rec.doc_type,
+            circular_number=ref.number,
         )
         storedb.insert_chunks(conn, chunks)
 
@@ -179,6 +191,7 @@ def run(
                     "clause_ref": c.clause_ref or "",
                     "page_start": c.page_start or 0,
                     "page_end": c.page_end or 0,
+                    "circular_number": c.circular_number or "",
                 }
                 for c in chunks
             ]

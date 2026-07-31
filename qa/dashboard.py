@@ -413,11 +413,12 @@ if submitted and question.strip():
     for i, c in enumerate(chunks, start=1):
         clause = c.clause_ref or "none detected"
         page = page_label(c.page_start, c.page_end)
+        letter_no = c.circular_number or "not detected"
         st.markdown(
             f"""
 <div class="citation-card">
   <div class="citation-title">{i}. {c.title} &mdash; {c.date or 'unknown date'}</div>
-  <div class="citation-meta">Clause {clause} &middot; Page {page} &middot; {c.source}</div>
+  <div class="citation-meta">No. {letter_no} &middot; Clause {clause} &middot; Page {page} &middot; {c.source}</div>
   <div class="citation-section">{c.section_path}</div>
 </div>
 """,
