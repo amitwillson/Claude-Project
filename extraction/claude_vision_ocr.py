@@ -44,11 +44,23 @@ TRANSCRIBE_PROMPT = (
 )
 
 
-def _render_page_png_base64(path: Path, page_num: int) -> Optional[str]:
-    from pdf2image import convert_from_path
+def _render_page_png_base64(pdf_bytes: bytes, page_num: int) -> Optional[str]:
+    from pdf2image import convert_from_bytes
+    from PIL import Image
 
-    images = convert_from_path(
-        str(path), first_page=page_num, last_page=page_num, dpi=_OCR_DPI, timeout=120
+    # Some circulars are nested deep enough that the full path exceeds
+    # Windows' classic 260-character MAX_PATH limit -- pdftoppm.exe (a
+    # native subprocess) can't open such paths even though Python can, so
+    # we read the bytes ourselves and pipe them in rather than passing a
+    # file path. Also disable PIL's decompression-bomb guard: it's meant for
+    # untrusted image sources, but these all come from PDFs we ourselves
+    # downloaded from the Railway Board site, and oversized tariff-table
+    # pages at 300 DPI can otherwise hit it as a hard error, not just a
+    # warning.
+    Image.MAX_IMAGE_PIXELS = None
+
+    images = convert_from_bytes(
+        pdf_bytes, first_page=page_num, last_page=page_num, dpi=_OCR_DPI, timeout=120
     )
     if not images:
         return None
@@ -62,10 +74,11 @@ def transcribe_document(path: Path, page_count: int, model: str, client) -> str:
     to render or gets an API error is skipped (stays blank) rather than
     aborting the whole document."""
     n_pages = min(max(page_count, 1), MAX_PAGES_PER_DOC)
+    pdf_bytes = path.read_bytes()
     all_text = []
     for page_num in range(1, n_pages + 1):
         try:
-            img_b64 = _render_page_png_base64(path, page_num)
+            img_b64 = _render_page_png_base64(pdf_bytes, page_num)
             if img_b64 is None:
                 all_text.append("")
                 continue

@@ -143,15 +143,20 @@ def _extract_with_ocr(path: Path, page_count: int) -> tuple[str, float]:
     at a time. A page that fails to render or OCR in time is skipped (its
     text stays empty) rather than aborting the whole document."""
     import pytesseract
-    from pdf2image import convert_from_path
+    from pdf2image import convert_from_bytes
 
     lang = _ocr_lang(pytesseract)
+    # Read the bytes ourselves and pipe them to Poppler rather than passing a
+    # file path: some circular filenames + folder nesting exceed Windows'
+    # classic 260-character MAX_PATH limit, which Python itself handles fine
+    # but pdftoppm.exe (a native subprocess) cannot open.
+    pdf_bytes = path.read_bytes()
     all_text = []
     confidences: list[float] = []
     for page_num in range(1, max(page_count, 1) + 1):
         try:
-            images = convert_from_path(
-                str(path),
+            images = convert_from_bytes(
+                pdf_bytes,
                 first_page=page_num,
                 last_page=page_num,
                 dpi=_OCR_DPI,
