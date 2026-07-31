@@ -67,7 +67,9 @@ def extract_document(local_path: Path, doc_type: str):
     }
 
 
-def run(docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = False) -> dict:
+def run(
+    docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = False, force: bool = False
+) -> dict:
     records = load_index(Path(docs_dir))
     conn = storedb.connect(db_path)
 
@@ -94,7 +96,7 @@ def run(docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = Fa
         if not local_path.exists():
             continue
 
-        if storedb.document_exists_with_sha1(conn, rec.doc_id, rec.sha1):
+        if not force and storedb.document_exists_with_sha1(conn, rec.doc_id, rec.sha1):
             skipped += 1
             continue
 
@@ -220,6 +222,14 @@ def main(argv=None) -> int:
     parser.add_argument("--db-path", default="data/ir_kb.sqlite3")
     parser.add_argument("--vector-dir", default="data/chroma_db")
     parser.add_argument("--skip-embeddings", action="store_true", help="Skip embedding/vector indexing (metadata+FTS only).")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract and re-chunk every document, ignoring the incremental sha1/needs_review skip. "
+        "Needed after a chunking-logic change (e.g. clause/page tracking) so already-successful "
+        "documents get re-chunked with the new logic, not just newly-added/previously-flagged ones. "
+        "Slow: re-runs OCR for every document that originally needed it.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -228,7 +238,9 @@ def main(argv=None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    stats = run(args.docs_dir, args.db_path, args.vector_dir, skip_embeddings=args.skip_embeddings)
+    stats = run(
+        args.docs_dir, args.db_path, args.vector_dir, skip_embeddings=args.skip_embeddings, force=args.force
+    )
     logger.info("Extraction complete: %s", stats)
     return 0
 
