@@ -74,7 +74,8 @@ python qa/ask.py "What is the current policy on refund of unused tickets?"
 python qa/ask.py "List all circulars on parcel booking" --exhaustive   # or just phrase it that way — auto-detected
 
 # ...or the web UI:
-streamlit run qa/webapp.py
+streamlit run qa/webapp.py        # minimal
+streamlit run qa/dashboard.py     # branded dashboard: live coverage stats, styled citation cards
 ```
 
 Re-running `run_scraper` / `run_extract` is safe and incremental: the
