@@ -103,6 +103,12 @@ documents whose SHA1 hasn't changed since the last run.
   best-effort -- reference-number formats aren't standardized across
   directorates/years (same caveat as `extraction/supersession.py`), so a
   `None` result means "not detected," not "document has no number."
+  To backfill this field into an already-indexed database without
+  re-running extraction/OCR (a document's letterhead is always within its
+  first chunk, already stored from the prior run), use
+  `python -m extraction.backfill_document_ref` -- fast, no PDF/API access
+  needed. A full `extraction/run_extract.py --force` re-run is only needed
+  if you want to re-derive everything else (chunking, OCR quality) too.
 - **Embeddings provider**: Anthropic's API does not currently offer a
   dedicated embeddings endpoint, so `storage/embeddings.py` defaults to a
   local, free, offline `sentence-transformers` model (`all-MiniLM-L6-v2`).
