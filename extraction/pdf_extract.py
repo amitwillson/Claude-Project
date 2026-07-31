@@ -124,7 +124,15 @@ def _preprocess_for_ocr(image):
     """Grayscale + autocontrast before OCR -- cheap, no extra dependencies
     (PIL ships with pdf2image), and frequently recovers faded/low-contrast
     scans that Tesseract otherwise reads as blank or garbled."""
-    from PIL import ImageOps
+    from PIL import Image, ImageOps
+
+    # PIL warns about "decompression bomb" risk on very large images (some
+    # oversized tariff-table pages render to 100M+ pixels at 300 DPI). That
+    # guard exists for untrusted/adversarial image sources; every image here
+    # comes from a PDF we ourselves downloaded from the Railway Board site,
+    # so it's a false positive worth silencing rather than spamming the log
+    # on every large page.
+    Image.MAX_IMAGE_PIXELS = None
 
     gray = image.convert("L")
     return ImageOps.autocontrast(gray)
