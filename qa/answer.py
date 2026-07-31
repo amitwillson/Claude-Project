@@ -33,7 +33,14 @@ detection is heuristic and the user may want to verify against the original docu
 4. If asked to list/summarize many circulars, cover every relevant one shown in the \
 excerpts you were given -- do not stop at the first few.
 
-5. Be concise and precise. Do not editorialize beyond what the source text supports."""
+5. Be concise and precise. Do not editorialize beyond what the source text supports.
+
+6. Some excerpts are placeholders beginning with "[No machine-readable text could be \
+extracted from this document by OCR...]" -- this means a real, indexed circular exists \
+and is relevant by title/date/section, but its content could not be automatically read. \
+Tell the user such a circular appears relevant and point them to the original PDF; do \
+NOT treat the placeholder as if the circular contains no policy, and do NOT say "no \
+matching circular found" when a placeholder excerpt was retrieved."""
 
 
 @dataclass

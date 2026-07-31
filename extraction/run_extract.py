@@ -123,42 +123,60 @@ def run(docs_dir: str, db_path: str, vector_dir: str, skip_embeddings: bool = Fa
             )
 
         storedb.delete_chunks_for_doc(conn, rec.doc_id)
-        if text.strip():
-            chunks = chunk_text(
-                text=text,
-                doc_id=rec.doc_id,
-                section_path=rec.section_path,
-                title=rec.title,
-                date=rec.date_parsed or rec.date_raw,
-                source_url=rec.source_url,
-                local_path=rec.local_path,
-                doc_type=rec.doc_type,
-            )
-            storedb.insert_chunks(conn, chunks)
 
+        # A document whose text couldn't be extracted at all (OCR genuinely
+        # failed, corrupt file, etc.) must still be indexable by its
+        # metadata -- otherwise it's invisible to Q&A, and a user asking
+        # about that exact circular gets told "no matching circular found"
+        # even though the PDF genuinely exists. Index a placeholder chunk
+        # that says so explicitly, so retrieval can still surface it and
+        # point back to the original PDF rather than silently omitting it.
+        is_placeholder = not text.strip()
+        indexable_text = text
+        if is_placeholder:
+            indexable_text = (
+                f"[No machine-readable text could be extracted from this document by OCR. "
+                f"Title: {rec.title}. Section: {rec.section_path}. "
+                f"Date: {rec.date_parsed or rec.date_raw or 'unknown'}. "
+                f"Refer to the original PDF ({rec.local_path}) for its content.]"
+            )
+
+        chunks = chunk_text(
+            text=indexable_text,
+            doc_id=rec.doc_id,
+            section_path=rec.section_path,
+            title=rec.title,
+            date=rec.date_parsed or rec.date_raw,
+            source_url=rec.source_url,
+            local_path=rec.local_path,
+            doc_type=rec.doc_type,
+        )
+        storedb.insert_chunks(conn, chunks)
+
+        if not is_placeholder:
             refs = find_supersession_refs(text)
             storedb.insert_supersession_refs(conn, rec.doc_id, refs)
 
-            if vector_store is not None and embedder is not None and chunks:
-                embeddings = embedder.embed([c.text for c in chunks])
-                metadatas = [
-                    {
-                        "doc_id": c.doc_id,
-                        "title": c.title,
-                        "section_path": c.section_path,
-                        "date": c.date or "",
-                        "source_url": c.source_url,
-                        "local_path": c.local_path or "",
-                        "chunk_index": c.chunk_index,
-                    }
-                    for c in chunks
-                ]
-                vector_store.add_chunks(
-                    chunk_ids=[c.chunk_id for c in chunks],
-                    embeddings=embeddings,
-                    documents=[c.text for c in chunks],
-                    metadatas=metadatas,
-                )
+        if vector_store is not None and embedder is not None and chunks:
+            embeddings = embedder.embed([c.text for c in chunks])
+            metadatas = [
+                {
+                    "doc_id": c.doc_id,
+                    "title": c.title,
+                    "section_path": c.section_path,
+                    "date": c.date or "",
+                    "source_url": c.source_url,
+                    "local_path": c.local_path or "",
+                    "chunk_index": c.chunk_index,
+                }
+                for c in chunks
+            ]
+            vector_store.add_chunks(
+                chunk_ids=[c.chunk_id for c in chunks],
+                embeddings=embeddings,
+                documents=[c.text for c in chunks],
+                metadatas=metadatas,
+            )
 
         logger.info(
             "Extracted %s (%d words, needs_review=%s)",
