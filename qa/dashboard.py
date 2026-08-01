@@ -76,21 +76,23 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
 }
 
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
-/* The sidebar's reopen arrow lives inside the header element hidden
-   above -- hiding the whole header took the arrow down with it, so a
-   collapsed sidebar had no way to reopen. Force it back to visible so the
-   toggle always works regardless of the header being hidden. Streamlit's
-   test-id for this control has changed across versions
-   (stSidebarCollapsedControl / collapsedControl / stExpandSidebarButton
-   all seen in the wild), so cover all of them defensively. */
+/* The sidebar is meant to be permanently visible -- New chat, retrieval
+   mode, and auto-update status all live there and shouldn't be one
+   mis-click away from disappearing. Hide the collapse control entirely
+   (rather than just fixing the reopen arrow) so the sidebar can't be
+   collapsed in the first place. Streamlit's test-id for this button has
+   changed across versions in the wild, so cover the ones seen. */
+[data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"],
 [data-testid="stExpandSidebarButton"] {
-    visibility: visible !important;
-    opacity: 1 !important;
-    height: auto !important;
-    width: auto !important;
-    display: flex !important;
+    display: none !important;
+}
+section[data-testid="stSidebar"] {
+    min-width: 300px !important;
+    max-width: 300px !important;
+    width: 300px !important;
+    transform: none !important;
 }
 .block-container { padding-top: 0; max-width: 1200px; }
 
