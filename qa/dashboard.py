@@ -252,6 +252,16 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
     color: var(--india-green) !important;
     border: 1px solid rgba(18, 136, 7, 0.3);
 }
+.status-badge.amended {
+    background: rgba(255, 153, 51, 0.12);
+    color: #b5691a !important;
+    border: 1px solid rgba(255, 153, 51, 0.4);
+}
+.status-badge.ambiguous {
+    background: rgba(100, 116, 139, 0.1);
+    color: #475569 !important;
+    border: 1px solid rgba(100, 116, 139, 0.35);
+}
 
 /* Streamlit widget restyle */
 .stTextInput input {
@@ -391,12 +401,16 @@ def _stats(conn):
     superseded = conn.execute(
         "SELECT COUNT(*) FROM documents WHERE superseded_by_doc_id IS NOT NULL AND superseded_by_doc_id != ''"
     ).fetchone()[0]
+    amended = conn.execute("SELECT COUNT(*) FROM chunks WHERE status = 'amended'").fetchone()[0]
     coverage_pct = round(100 * (total - flagged) / total, 1) if total else 0.0
     number_pct = round(100 * with_number / total, 1) if total else 0.0
-    return total, flagged, sections, chunks, coverage_pct, number_pct, superseded
+    return total, flagged, sections, chunks, coverage_pct, number_pct, superseded, amended
 
 
-total_docs, flagged_docs, sections_count, chunk_count, coverage_pct, number_pct, superseded_count = _stats(conn)
+(
+    total_docs, flagged_docs, sections_count, chunk_count,
+    coverage_pct, number_pct, superseded_count, amended_count,
+) = _stats(conn)
 
 st.markdown(
     f"""
@@ -424,6 +438,10 @@ st.markdown(
   <div class="stat-card c-red">
     <div class="stat-label">Superseded Rules Resolved</div>
     <div class="stat-value red">{superseded_count:,}</div>
+  </div>
+  <div class="stat-card c-saffron">
+    <div class="stat-label">Clauses Partially Amended</div>
+    <div class="stat-value saffron">{amended_count:,}</div>
   </div>
 </div>
 """,
@@ -488,11 +506,15 @@ if submitted and question.strip():
         clause = c.clause_ref or "none detected"
         page = page_label(c.page_start, c.page_end)
         letter_no = c.circular_number or "not detected"
-        status_badge = (
-            f'<div class="status-badge superseded">Superseded by {c.superseded_by_summary}</div>'
-            if c.superseded_by_summary
-            else '<div class="status-badge current">Current</div>'
-        )
+        status_labels = {
+            "superseded": "Superseded",
+            "amended": "Partially amended",
+            "ambiguous": "Conflicting signals",
+        }
+        if c.status in status_labels:
+            status_badge = f'<div class="status-badge {c.status}">{status_labels[c.status]}: {c.status_note}</div>'
+        else:
+            status_badge = '<div class="status-badge current">Current</div>'
         st.markdown(
             f"""
 <div class="citation-card">

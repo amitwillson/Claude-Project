@@ -2,7 +2,7 @@ from qa.retrieval import retrieve
 from storage import db as storedb
 
 
-def _chunk(chunk_id, doc_id, text, title="Refund policy", superseded_by_doc_id=""):
+def _chunk(chunk_id, doc_id, text, title="Refund policy"):
     class _C:
         pass
 
@@ -45,7 +45,7 @@ def test_specific_mode_filters_out_superseded_chunk_when_a_current_one_exists(tm
     _seed_doc(conn, "new")
     storedb.insert_chunks(conn, [_chunk("old::0", "old", "refund of unused tickets old rule")])
     storedb.insert_chunks(conn, [_chunk("new::0", "new", "refund of unused tickets new rule")])
-    storedb.set_superseded(conn, "old", "new", "Refund policy (No. TC-I/2021/1) dated 2021-01-01")
+    storedb.set_chunk_status(conn, ["old::0"], "superseded", "Refund policy (No. TC-I/2021/1) dated 2021-01-01")
 
     chunks, mode = retrieve("refund of unused tickets", conn, exhaustive=False)
     assert mode == "specific"
@@ -59,10 +59,27 @@ def test_specific_mode_falls_back_to_superseded_chunk_when_nothing_else_matches(
     conn = storedb.connect(db_path)
     _seed_doc(conn, "old")
     storedb.insert_chunks(conn, [_chunk("old::0", "old", "refund of unused tickets old rule")])
-    storedb.set_superseded(conn, "old", "not_indexed_successor", "some circular")
+    storedb.set_chunk_status(conn, ["old::0"], "superseded", "some circular")
 
     chunks, mode = retrieve("refund of unused tickets", conn, exhaustive=False)
     assert "old::0" in [c.chunk_id for c in chunks]
+    conn.close()
+
+
+def test_specific_mode_keeps_amended_and_ambiguous_chunks(tmp_path):
+    db_path = tmp_path / "test.sqlite3"
+    conn = storedb.connect(db_path)
+    _seed_doc(conn, "amended_doc")
+    _seed_doc(conn, "ambiguous_doc")
+    storedb.insert_chunks(conn, [_chunk("amended::0", "amended_doc", "refund of unused tickets clause 4")])
+    storedb.insert_chunks(conn, [_chunk("ambiguous::0", "ambiguous_doc", "refund of unused tickets clause 5")])
+    storedb.set_chunk_status(conn, ["amended::0"], "amended", "Amended (Clause 4) by X")
+    storedb.set_chunk_status(conn, ["ambiguous::0"], "ambiguous", "Conflicting supersession signals: ...")
+
+    chunks, mode = retrieve("refund of unused tickets", conn, exhaustive=False)
+    ids = [c.chunk_id for c in chunks]
+    assert "amended::0" in ids
+    assert "ambiguous::0" in ids
     conn.close()
 
 
@@ -73,7 +90,7 @@ def test_exhaustive_mode_keeps_superseded_chunks(tmp_path):
     _seed_doc(conn, "new")
     storedb.insert_chunks(conn, [_chunk("old::0", "old", "refund of unused tickets old rule")])
     storedb.insert_chunks(conn, [_chunk("new::0", "new", "refund of unused tickets new rule")])
-    storedb.set_superseded(conn, "old", "new", "Refund policy (No. TC-I/2021/1) dated 2021-01-01")
+    storedb.set_chunk_status(conn, ["old::0"], "superseded", "Refund policy (No. TC-I/2021/1) dated 2021-01-01")
 
     chunks, mode = retrieve("refund of unused tickets", conn, exhaustive=True)
     assert mode == "exhaustive"

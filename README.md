@@ -127,44 +127,65 @@ documents whose SHA1 hasn't changed since the last run.
   This costs nothing and works offline, at some quality cost vs. a large
   hosted embedding model. The `EmbeddingProvider` interface is pluggable if
   you want to swap in a hosted provider later.
-- **Supersession detection + resolution -- keeping answers on the latest rule**
-  (`extraction/supersession.py` + `extraction/resolve_supersession.py`):
-  detection is regex-based matching of phrases like "in supersession of...",
-  "in partial modification of...", "amends...", "in continuation of...",
-  plus best-effort extraction of the referenced circular number/date from
-  the surrounding text (`supersession_refs` table). Circular numbering
-  formats are **not** consistent across years/directorates, so this will
-  miss references in unfamiliar formats -- a known, documented limitation,
-  not something a regex can fully solve.
+- **Supersession detection + resolution -- keeping answers on the latest rule,
+  per CLAUSE not just per document** (`extraction/supersession.py` +
+  `extraction/resolve_supersession.py`): detection is regex-based matching
+  of phrases like "in supersession of...", "in partial modification of
+  Clause 4 of...", "amends...", "in continuation of...", plus best-effort
+  extraction of the referenced circular number/date/clause from the
+  surrounding text (`supersession_refs` table). Circular numbering formats
+  are **not** consistent across years/directorates, so this will miss
+  references in unfamiliar formats -- a known, documented limitation, not
+  something a regex can fully solve.
   A separate resolution pass (`extraction.resolve_supersession`, re-run
-  after every extraction pass) turns those *candidate* references into an
-  actual link between two **indexed** documents: it matches a reference's
-  number against another document's own detected `document_number`
-  (loose, punctuation-insensitive comparison; no fuzzy title guessing, to
-  avoid a second noisy layer on top of an already-heuristic first one), and
-  only accepts the link if the superseding document's date isn't *before*
-  the one it claims to replace (guards against a number-format collision
-  producing a nonsensical link). When more than one document claims to
-  supersede the same old circular, the most recently dated one wins.
+  after every extraction pass, safe/idempotent) turns those *candidate*
+  references into a **per-chunk status** on indexed documents -- not a
+  whole-document flag. This distinction matters: a circular that only had
+  one clause amended is still the correct source for its other clauses, and
+  treating any detected reference as a full replacement (an earlier version
+  of this resolver did) would have wrongly hidden all of them. Each chunk
+  ends up as one of:
+  - `current` -- nothing in the index contradicts it (the default).
+  - `superseded` -- a later document's "in supersession of..." replaced the
+    *entire* document this chunk is from.
+  - `amended` -- a later document's "in partial modification of Clause N
+    of..." / "amends..." changed *only this clause* (or a sub-clause of
+    it); the rest of the same document's chunks are unaffected and stay
+    `current`.
+  - `ambiguous` -- conflicting signals resolved to the same chunk (e.g. one
+    document claims to fully supersede it while a different, differently
+    dated document claims to have only amended it). Deliberately **not**
+    auto-resolved either way -- surfaced instead of guessed.
+  Matching is conservative throughout: a reference is only resolved against
+  an indexed document when its number matches that document's own detected
+  `document_number` (loose, punctuation-insensitive; no fuzzy title
+  guessing), a link is rejected if the superseding document is dated
+  *before* the one it claims to affect (guards against a number-format
+  collision), and a partial-relation reference with no clause named at all
+  is left alone entirely rather than guessed at. When several documents
+  fully supersede the same old one, the most recently dated wins; a
+  document only gets rolled up to a whole-document "fully superseded" flag
+  (used by the dashboard stat) once *every* one of its chunks independently
+  resolves to `superseded` by the same successor.
   Once resolved, this directly changes what the Q&A engine returns:
-  - **Retrieval** (`qa/retrieval.py`) drops superseded documents from the
+  - **Retrieval** (`qa/retrieval.py`) drops `superseded` chunks from the
     default "specific" answer mode so an old rule doesn't crowd out its
-    replacement in the top-N results -- but only when a current document is
-    also available; if the only indexed match happens to be a superseded
-    one (e.g. its successor was never scraped, or resolution is
-    incomplete), it's still returned rather than answering with nothing.
-    Exhaustive mode ("list all...") always includes every match, superseded
-    or not, since that mode's purpose is a complete list/audit trail.
-  - **Answering** (`qa/answer.py`) labels every superseded excerpt handed to
-    Claude with `Status: SUPERSEDED by <successor>`, and the system prompt
-    instructs Claude to lead with the current/successor circular's rule,
-    using the superseded one only for historical context -- never as the
-    primary answer.
-  - Unresolved supersession language (a real "in supersession of..." phrase
-    whose target wasn't matched to an indexed document, or a conflict with
-    no explicit supersession language at all) still falls back to the
-    original behavior: surfaced explicitly to the user rather than silently
-    picked, with a note that supersession detection is heuristic and worth
+    replacement -- but never `amended` or `ambiguous` chunks (they still
+    hold real, needed content), and never drops to zero results just
+    because everything relevant happens to be superseded. Exhaustive mode
+    ("list all...") always includes every match regardless of status, since
+    that mode's purpose is a complete list/audit trail.
+  - **Answering** (`qa/answer.py`) labels each excerpt's status for Claude
+    (`Status: SUPERSEDED by ...` / `AMENDED by ...` / `AMBIGUOUS -- ...`),
+    and the system prompt instructs it to lead with the current rule, but
+    explicitly **combine** an amended clause with the surrounding
+    still-current clauses of the same circular into one answer rather than
+    treating the whole document as replaced.
+  - Unresolved supersession language (a real reference whose target wasn't
+    matched to an indexed document, or a conflict with no explicit
+    supersession language at all) still falls back to the original
+    behavior: surfaced explicitly to the user rather than silently picked,
+    with a note that supersession detection is heuristic and worth
     verifying against the original documents.
 - **OCR fallback**: PDFs whose native text layer looks empty or sparse
   (fewer than ~20 words/page) are re-processed with `pytesseract` +

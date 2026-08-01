@@ -38,6 +38,28 @@ _CIRCULAR_REF_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# e.g. "Clause 4", "Clause 3.2", "Para 5", "Paragraph 2.1", "Item (iii)" --
+# used to scope a partial_modification/modification/amendment to the
+# specific part of the referenced document it touches, rather than the
+# whole document. Only meaningful for the non-full-supersession relations;
+# see _PARTIAL_RELATIONS below. Absence of a match means the scope genuinely
+# couldn't be determined (common -- plenty of amendments just say "amends
+# Circular No. X" without naming a clause), which callers must treat as
+# "unknown scope", not "whole document".
+_CLAUSE_RE = re.compile(
+    r"\b(?:Clause|Para(?:graph)?|Item|Sub-?[Cc]lause)\s*[:.\-]?\s*(\d+(?:\.\d+)*|\([a-zA-Z0-9]+\))",
+    re.IGNORECASE,
+)
+
+# Relations that replace the referenced document in its entirety.
+FULL_RELATIONS = {"supersession"}
+# Relations that only change part of the referenced document -- must be
+# scoped to a specific clause (via _CLAUSE_RE) to be actionable; otherwise
+# the affected part is unknown and downstream consumers must not guess.
+PARTIAL_RELATIONS = {"partial_modification", "modification", "amendment"}
+# Purely informational -- doesn't change the referenced document's status.
+INFORMATIONAL_RELATIONS = {"continuation"}
+
 
 @dataclass
 class SupersessionRef:
@@ -47,6 +69,7 @@ class SupersessionRef:
     referenced_year: Optional[str]
     referenced_date_raw: Optional[str]
     matched_sentence: str
+    referenced_clause: Optional[str] = None
 
 
 # How far past a relation phrase ("in supersession of", ...) to look for the
@@ -70,6 +93,9 @@ def find_supersession_refs(text: str) -> list[SupersessionRef]:
             m = _CIRCULAR_REF_RE.search(window, pos=rel_match.end() - window_start)
             snippet = window[: m.end()] if m else window.split(".")[0]
 
+            clause_match = _CLAUSE_RE.search(window)
+            referenced_clause = clause_match.group(1).strip("()") if clause_match else None
+
             refs.append(
                 SupersessionRef(
                     relation=relation,
@@ -78,6 +104,7 @@ def find_supersession_refs(text: str) -> list[SupersessionRef]:
                     referenced_year=m.group("year") if m else None,
                     referenced_date_raw=m.group("date") if m else None,
                     matched_sentence=snippet.strip(),
+                    referenced_clause=referenced_clause,
                 )
             )
     return refs
