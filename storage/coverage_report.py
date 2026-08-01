@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -14,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scraper.models import load_index
+from storage import db as storedb
 
 LOW_COUNT_THRESHOLD = 2  # sections/years with fewer than this many docs are flagged
 
@@ -27,6 +27,7 @@ def build_report(docs_dir: str | Path, db_path: str | Path, out_path: str | Path
 
     extracted = 0
     flagged = 0
+    with_document_number = 0
     per_section_extracted: Counter = Counter()
     per_section_discovered: Counter = Counter()
     for r in records:
@@ -34,13 +35,17 @@ def build_report(docs_dir: str | Path, db_path: str | Path, out_path: str | Path
 
     db_path = Path(db_path)
     if db_path.exists():
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+        # storage.db.connect() (not a raw sqlite3.connect()) so schema
+        # migrations always run first -- otherwise a database created by an
+        # older version of this project would be missing newer columns
+        # (e.g. document_number) and this query would crash.
+        conn = storedb.connect(db_path)
         rows = conn.execute(
-            "SELECT doc_id, section_path, needs_review, word_count FROM documents"
+            "SELECT doc_id, section_path, needs_review, word_count, document_number FROM documents"
         ).fetchall()
         extracted = len(rows)
         flagged = sum(1 for row in rows if row["needs_review"])
+        with_document_number = sum(1 for row in rows if row["document_number"])
         for row in rows:
             per_section_extracted[row["section_path"]] += 1
         conn.close()
@@ -56,6 +61,12 @@ def build_report(docs_dir: str | Path, db_path: str | Path, out_path: str | Path
     lines.append(f"- Documents downloaded: **{downloaded}**")
     lines.append(f"- Documents extracted/indexed: **{extracted}**")
     lines.append(f"- Documents flagged for manual review: **{flagged}**")
+    if extracted:
+        pct = round(100 * with_document_number / extracted, 1)
+        lines.append(
+            f"- Documents with a detected notification/letter number: "
+            f"**{with_document_number}** ({pct}%)"
+        )
     lines.append("")
 
     lines.append("## Per-section breakdown")

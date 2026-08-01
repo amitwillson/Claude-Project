@@ -124,7 +124,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .hero-slogan b { color: var(--accent-gold) !important; font-style: normal; }
 
 /* ---- Stat cards ---- */
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin-bottom: 1.75rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem; margin-bottom: 1.75rem; }
 .stat-card {
     background: var(--bg-panel);
     border: 1px solid rgba(255,255,255,0.06);
@@ -138,6 +138,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stat-card.c-violet { border-top: 2px solid var(--accent-violet); }
 .stat-card.c-teal   { border-top: 2px solid var(--accent-teal); }
 .stat-card.c-gold   { border-top: 2px solid var(--accent-gold); }
+.stat-card.c-magenta { border-top: 2px solid var(--accent-magenta); }
 .stat-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.68rem;
@@ -156,6 +157,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stat-value.violet { color: var(--accent-violet) !important; }
 .stat-value.teal   { color: var(--accent-teal) !important; }
 .stat-value.gold   { color: var(--accent-gold) !important; }
+.stat-value.magenta { color: var(--accent-magenta) !important; }
 
 /* ---- Answer panel ---- */
 .answer-panel {
@@ -326,11 +328,15 @@ def _stats(conn):
     flagged = conn.execute("SELECT COUNT(*) FROM documents WHERE needs_review = 1").fetchone()[0]
     sections = conn.execute("SELECT COUNT(DISTINCT section_path) FROM documents").fetchone()[0]
     chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    with_number = conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE document_number IS NOT NULL AND document_number != ''"
+    ).fetchone()[0]
     coverage_pct = round(100 * (total - flagged) / total, 1) if total else 0.0
-    return total, flagged, sections, chunks, coverage_pct
+    number_pct = round(100 * with_number / total, 1) if total else 0.0
+    return total, flagged, sections, chunks, coverage_pct, number_pct
 
 
-total_docs, flagged_docs, sections_count, chunk_count, coverage_pct = _stats(conn)
+total_docs, flagged_docs, sections_count, chunk_count, coverage_pct, number_pct = _stats(conn)
 
 st.markdown(
     f"""
@@ -350,6 +356,10 @@ st.markdown(
   <div class="stat-card c-gold">
     <div class="stat-label">Extraction Coverage</div>
     <div class="stat-value gold">{coverage_pct}%</div>
+  </div>
+  <div class="stat-card c-magenta">
+    <div class="stat-label">Notification No. Detected</div>
+    <div class="stat-value magenta">{number_pct}%</div>
   </div>
 </div>
 """,
