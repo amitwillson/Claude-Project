@@ -11,6 +11,7 @@
 # qa/webapp.py stays as the minimal fallback UI.
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -32,7 +33,11 @@ st.set_page_config(
     page_title="Traffic Commercial Intelligence — Ministry of Railways",
     page_icon="🚆",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" (not "expanded"): Streamlit auto-collapses the sidebar on
+    # narrow/mobile viewports with this setting, but "expanded" forces it
+    # open regardless of screen size -- on a phone that means an overlay
+    # covering most of the screen and blocking the search box underneath.
+    initial_sidebar_state="auto",
 )
 
 # ---------------------------------------------------------------------------
@@ -339,6 +344,34 @@ button[kind="primaryFormSubmit"], button[kind="primaryFormSubmit"] *,
 button[kind="secondaryFormSubmit"], button[kind="secondaryFormSubmit"] * {
     color: #ffffff !important;
 }
+
+/* Columns (source-link / download-button row on each citation card) should
+   stack instead of squeezing side by side on a narrow phone screen. */
+[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+
+/* ---- Mobile ---- */
+@media (max-width: 640px) {
+    .block-container { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+    .gov-strip-caption { font-size: 0.56rem; letter-spacing: 0.05em; padding: 0 0.5rem; }
+    .hero {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 1.1rem 1.1rem;
+        gap: 0.6rem;
+    }
+    .hero-mark { width: 46px; height: 46px; font-size: 1.3rem; }
+    .hero-eyebrow { font-size: 0.6rem; letter-spacing: 0.08em; }
+    .hero-title { font-size: 1.3rem; }
+    .hero-slogan { font-size: 0.85rem; }
+    .hero-slogan .hindi { display: block; margin-left: 0; margin-top: 0.15rem; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+    .stat-card { padding: 0.75rem 0.9rem; }
+    .stat-value { font-size: 1.3rem; }
+    .answer-panel { padding: 1.1rem 1.25rem; font-size: 0.95rem; }
+    .citation-card { padding: 0.75rem 0.9rem; }
+    .citation-title { font-size: 0.88rem; }
+    [data-testid="stHorizontalBlock"] > div { width: 100% !important; flex: 1 1 100% !important; }
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -366,6 +399,34 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+# ---------------------------------------------------------------------------
+# Password gate -- only enforced when DASHBOARD_PASSWORD is set (see
+# .env.example). Meant for when this dashboard is exposed via a tunnel
+# (ngrok, etc.) to a link being shared with someone else: without a gate,
+# anyone with the link could ask unlimited questions billed to your
+# ANTHROPIC_API_KEY. Checked BEFORE connecting to the database/vector store
+# below, so an unauthenticated visitor never even triggers backend I/O.
+# Local-only use (no DASHBOARD_PASSWORD set) is unaffected.
+# ---------------------------------------------------------------------------
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD")
+
+if DASHBOARD_PASSWORD and not st.session_state.get("authenticated"):
+    st.markdown(
+        '<div class="answer-panel">This dashboard is password-protected. '
+        'Enter the access password to continue.</div>',
+        unsafe_allow_html=True,
+    )
+    with st.form("password_gate"):
+        entered_password = st.text_input("Password", type="password")
+        submitted_password = st.form_submit_button("Enter")
+    if submitted_password:
+        if entered_password == DASHBOARD_PASSWORD:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
