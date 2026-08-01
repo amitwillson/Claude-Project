@@ -1,0 +1,12 @@
+[
+  {
+    "question": "Replace this with a real question you already know the answer to.",
+    "expected_number": "e.g. TC-I/2020/109/1 -- the circular's own notification/letter number",
+    "notes": "Delete this placeholder entry and add your own real cases below."
+  },
+  {
+    "question": "Or, if you don't know the exact number, use a keyword from the correct circular's title instead.",
+    "expected_keyword": "e.g. refund",
+    "notes": "expected_keyword checks the citation TITLE instead of the number -- use whichever you're more confident about."
+  }
+]
