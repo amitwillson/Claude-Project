@@ -1,0 +1,10 @@
+[
+  {
+    "question": "What is the current policy on refund of unused tickets?",
+    "expected_keyword": "refund"
+  },
+  {
+    "question": "What is the current PCC for BOXN wagons?",
+    "expected_keyword": "PCC"
+  }
+]
