@@ -76,6 +76,11 @@ python qa/ask.py "List all circulars on parcel booking" --exhaustive   # or just
 # ...or the web UI:
 streamlit run qa/webapp.py        # minimal
 streamlit run qa/dashboard.py     # branded dashboard: live coverage stats, styled citation cards
+
+# Citation-accuracy validation -- run questions where YOU already know the
+# correct circular, and check whether it actually got cited. Copy
+# qa/example_cases.json, fill in real questions/answers, then:
+python qa/validate_citations.py my_cases.json
 ```
 
 Re-running `run_scraper` / `run_extract` is safe and incremental: the
