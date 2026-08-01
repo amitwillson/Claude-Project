@@ -35,11 +35,15 @@ st.set_page_config(
     page_title="Traffic Commercial Intelligence — Ministry of Railways",
     page_icon="🚆",
     layout="wide",
-    # "auto" (not "expanded"): Streamlit auto-collapses the sidebar on
-    # narrow/mobile viewports with this setting, but "expanded" forces it
-    # open regardless of screen size -- on a phone that means an overlay
-    # covering most of the screen and blocking the search box underneath.
-    initial_sidebar_state="auto",
+    # "expanded", not "auto": "auto" left some desktop browsers loading
+    # with the sidebar collapsed on first paint, and the collapse/expand
+    # arrow that should reopen it is inside header[data-testid="stHeader"],
+    # which is force-hidden below -- so a user who landed collapsed had no
+    # way back in and the whole sidebar (New chat, Sources, etc.) looked
+    # simply missing. Forcing "expanded" sidesteps relying on that hidden
+    # control on first load; the CSS fix below also keeps the control
+    # visible so manually collapsing still works.
+    initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------------------------
@@ -72,6 +76,16 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
 }
 
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+/* The sidebar's collapse/expand arrow lives inside the header element
+   hidden above -- hiding the whole header took the arrow down with it,
+   so a collapsed sidebar had no way to reopen. Force it back to visible
+   so the toggle always works regardless of the header being hidden. */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {
+    visibility: visible !important;
+    height: auto !important;
+    display: block !important;
+}
 .block-container { padding-top: 0; max-width: 1200px; }
 
 /* ---- Government-portal tricolor strip ---- */
