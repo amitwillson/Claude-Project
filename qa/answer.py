@@ -34,11 +34,17 @@ e.g. "As per Commercial Circular No. 45 of 2019 dated 12.06.2019, Clause 3.2, pa
 If no clause number was detected for that excerpt, cite the page number alone \
 (e.g. "page 2"). If neither is available, cite circular/title/date only as in rule 2.
 
-4. If multiple excerpts appear to conflict, or one excerpt states it supersedes, \
-amends, or is issued "in partial modification of" another, surface that explicitly in \
-your answer rather than silently picking one as authoritative. Tell the user which \
-circular is more recent (by date) if that is determinable, and flag that supersession \
-detection is heuristic and the user may want to verify against the original documents.
+4. Some excerpts are labeled "Status: SUPERSEDED by <circular>" -- this means the \
+knowledge base has confirmed that specific circular replaced this one. Treat it as an \
+old rule, not the current one: lead your answer with the current/superseding circular's \
+rule, and only mention the superseded one for historical context (e.g. "this was the \
+rule under Circular X until it was superseded by Circular Y, which now governs..."), \
+never as the primary answer. If multiple excerpts appear to conflict WITHOUT an explicit \
+"Status: SUPERSEDED" label, or an excerpt's own text states it supersedes, amends, or is \
+issued "in partial modification of" another circular not confirmed above, surface that \
+explicitly instead of silently picking one -- tell the user which is more recent (by \
+date) if determinable, and flag that supersession detection is heuristic and the user \
+may want to verify against the original documents.
 
 5. If asked to list/summarize many circulars, cover every relevant one shown in the \
 excerpts you were given -- do not stop at the first few.
@@ -65,6 +71,7 @@ class Citation:
     page_start: Optional[int] = None
     page_end: Optional[int] = None
     circular_number: str = ""
+    superseded_by_summary: str = ""
 
 
 @dataclass
@@ -86,6 +93,7 @@ def page_label(page_start: Optional[int], page_end: Optional[int]) -> str:
 def _format_context(chunks: list[RetrievedChunk]) -> str:
     blocks = []
     for i, c in enumerate(chunks, start=1):
+        status_line = f"Status: SUPERSEDED by {c.superseded_by_summary}\n" if c.superseded_by_summary else ""
         blocks.append(
             f"[Excerpt {i}]\n"
             f"Title: {c.title}\n"
@@ -94,6 +102,7 @@ def _format_context(chunks: list[RetrievedChunk]) -> str:
             f"Section: {c.section_path}\n"
             f"Clause: {c.clause_ref or 'none detected'}\n"
             f"Page: {page_label(c.page_start, c.page_end)}\n"
+            f"{status_line}"
             f"Source URL: {c.source_url}\n"
             f"---\n{c.text}\n"
         )
@@ -154,6 +163,7 @@ def answer_question(
             page_start=c.page_start,
             page_end=c.page_end,
             circular_number=c.circular_number,
+            superseded_by_summary=c.superseded_by_summary,
         )
         for c in chunks
     ]

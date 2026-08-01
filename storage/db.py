@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS documents (
     extraction_error TEXT,
     needs_review INTEGER DEFAULT 0,
     indexed_at TEXT,
-    document_number TEXT
+    document_number TEXT,
+    superseded_by_doc_id TEXT,
+    superseded_by_summary TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -49,14 +51,15 @@ CREATE TABLE IF NOT EXISTS chunks (
     page_start INTEGER,
     page_end INTEGER,
     circular_number TEXT,
+    superseded_by_doc_id TEXT,
+    superseded_by_summary TEXT,
     FOREIGN KEY (doc_id) REFERENCES documents(doc_id)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     chunk_id UNINDEXED,
     text,
-    title,
-    content=''
+    title
 );
 
 CREATE TABLE IF NOT EXISTS supersession_refs (
@@ -99,14 +102,42 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("page_start", "INTEGER"),
         ("page_end", "INTEGER"),
         ("circular_number", "TEXT"),
+        ("superseded_by_doc_id", "TEXT"),
+        ("superseded_by_summary", "TEXT"),
     ):
         if column not in existing_chunks:
             conn.execute(f"ALTER TABLE chunks ADD COLUMN {column} {coltype}")
 
     existing_documents = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
-    if "document_number" not in existing_documents:
-        conn.execute("ALTER TABLE documents ADD COLUMN document_number TEXT")
+    for column, coltype in (
+        ("document_number", "TEXT"),
+        ("superseded_by_doc_id", "TEXT"),
+        ("superseded_by_summary", "TEXT"),
+    ):
+        if column not in existing_documents:
+            conn.execute(f"ALTER TABLE documents ADD COLUMN {column} {coltype}")
 
+    conn.commit()
+    _migrate_fts(conn)
+
+
+def _migrate_fts(conn: sqlite3.Connection) -> None:
+    """chunks_fts was originally created as an FTS5 *contentless* table
+    (content=''), which never stores column values -- every stored chunk_id
+    silently comes back NULL, so fts_search()'s JOIN on f.chunk_id = c.chunk_id
+    always fails and keyword search returns nothing. `SCHEMA` above now
+    creates it correctly for brand-new databases, but `CREATE VIRTUAL TABLE
+    IF NOT EXISTS` leaves an existing (broken) table untouched -- so an
+    already-populated database needs to be rebuilt in place from `chunks`."""
+    row = conn.execute("SELECT chunk_id FROM chunks_fts LIMIT 1").fetchone()
+    if row is None or row["chunk_id"] is not None:
+        return  # empty, or already the correct (non-contentless) table
+    conn.execute("DROP TABLE chunks_fts")
+    conn.execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id UNINDEXED, text, title)")
+    conn.executemany(
+        "INSERT INTO chunks_fts (chunk_id, text, title) VALUES (?, ?, ?)",
+        [(r["chunk_id"], r["text"], r["title"]) for r in conn.execute("SELECT chunk_id, text, title FROM chunks")],
+    )
     conn.commit()
 
 
@@ -166,6 +197,10 @@ def insert_chunks(conn: sqlite3.Connection, chunks: Iterable) -> None:
                 c.clause_ref, c.page_start, c.page_end, c.circular_number,
             ),
         )
+        # superseded_by_* is deliberately not set here: it's resolved later,
+        # across the whole corpus, by extraction.resolve_supersession (a doc
+        # can only be known to be superseded once the superseding doc has
+        # also been indexed, which may not be true yet at insert time).
         conn.execute(
             "INSERT INTO chunks_fts (chunk_id, text, title) VALUES (?, ?, ?)",
             (c.chunk_id, c.text, c.title),
@@ -185,6 +220,23 @@ def insert_supersession_refs(conn: sqlite3.Connection, doc_id: str, refs: Iterab
                 ref.referenced_year, ref.referenced_date_raw, ref.matched_sentence,
             ),
         )
+    conn.commit()
+
+
+def set_superseded(conn: sqlite3.Connection, doc_id: str, superseded_by_doc_id: str, summary: str) -> None:
+    """Record that `doc_id` has been superseded by `superseded_by_doc_id`,
+    resolved from supersession_refs by extraction/resolve_supersession.py.
+    Denormalized onto every chunk of `doc_id` too (mirroring the existing
+    circular_number pattern) so retrieval can filter/label per-chunk without
+    an extra join against `documents` at query time."""
+    conn.execute(
+        "UPDATE documents SET superseded_by_doc_id = ?, superseded_by_summary = ? WHERE doc_id = ?",
+        (superseded_by_doc_id, summary, doc_id),
+    )
+    conn.execute(
+        "UPDATE chunks SET superseded_by_doc_id = ?, superseded_by_summary = ? WHERE doc_id = ?",
+        (superseded_by_doc_id, summary, doc_id),
+    )
     conn.commit()
 
 
