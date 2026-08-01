@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 from dotenv import load_dotenv
 
+from extraction import auto_update
 from qa.answer import answer_question, page_label
 from qa.retrieval import retrieve
 from storage import db as storedb
@@ -430,6 +431,39 @@ if DASHBOARD_PASSWORD and not st.session_state.get("authenticated"):
 
 
 # ---------------------------------------------------------------------------
+# Auto-update -- checks indianrailways.gov.in for new/changed circulars and
+# indexes them automatically, at most once per day (extraction/auto_update.py
+# has the full pipeline + gating logic). Runs in a background thread so the
+# dashboard opens immediately with the existing index rather than blocking on
+# a full site crawl. @st.cache_resource guarantees the thread is started
+# exactly once per server process, no matter how many browser tabs/visitors
+# hit the dashboard or how many times Streamlit reruns this script -- without
+# it, every widget interaction would try to kick off another crawl.
+# Placed AFTER the password gate above: an unauthenticated visitor should not
+# be able to trigger a site crawl or paid OCR spend just by loading the page.
+# ---------------------------------------------------------------------------
+DOCS_DIR = "documents"
+
+
+@st.cache_resource
+def _start_auto_update():
+    import threading
+
+    from extraction.auto_update import run_if_due
+
+    thread = threading.Thread(
+        target=run_if_due,
+        kwargs={"docs_dir": DOCS_DIR, "db_path": DB_PATH, "vector_dir": VECTOR_DIR},
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+_start_auto_update()
+
+
+# ---------------------------------------------------------------------------
 # Backend resources + live coverage stats
 # ---------------------------------------------------------------------------
 @st.cache_resource
@@ -518,6 +552,16 @@ if "history" not in st.session_state:
 with st.sidebar:
     st.markdown("### Session")
     st.caption("Answers are generated only from indexed circulars. Every claim is cited; if a circular has been superseded, the current one is cited first and the old one is marked accordingly.")
+
+    st.markdown("### Auto-update")
+    auto_update_state = auto_update.read_status()
+    _auto_update_icons = {
+        "idle": "⏳", "scraping": "🔎", "extracting": "📄", "resolving": "🔗",
+        "ocr": "🖼️", "done": "✅", "failed": "⚠️",
+    }
+    icon = _auto_update_icons.get(auto_update_state.status, "⏳")
+    st.caption(f"{icon} {auto_update_state.detail or 'Checking for new circulars...'}")
+
     if st.session_state.history:
         st.markdown("**Recent questions**")
         for q in reversed(st.session_state.history[-8:]):

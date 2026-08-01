@@ -94,6 +94,31 @@ Re-running `run_scraper` / `run_extract` is safe and incremental: the
 scraper skips documents already on disk (resumable), and extraction skips
 documents whose SHA1 hasn't changed since the last run.
 
+### Auto-update on dashboard launch
+
+`streamlit run qa/dashboard.py` no longer requires manually re-running the
+steps above to pick up new circulars. On launch it starts the whole
+pipeline above (scrape → extract → resolve supersession → paid Claude
+vision OCR for whatever's still unreadable) in a background thread, at
+most **once per day** (`extraction/auto_update.py`) -- a full site crawl
+takes real time even when nothing's new, so it's gated by a state file
+(`data/auto_update_state.json`) rather than running on every launch.
+- Runs in the background, non-blocking: the dashboard opens immediately
+  with the existing index; a status line in the sidebar ("Auto-update")
+  shows progress and updates on your next interaction.
+- Still needs the same Indian network connection as a manual
+  `run_scraper` call -- if that's unavailable, the check fails gracefully
+  (shown in the sidebar) and the existing index is untouched; nothing
+  about a failed check ever breaks the running dashboard.
+- The paid Claude-vision-OCR fallback step runs automatically too, capped
+  at `MAX_VISION_OCR_PER_RUN` (20) documents per check as a spend safety
+  limit -- a larger backlog is cleared gradually over several days'
+  checks rather than in one unbounded, no-confirmation API bill.
+- To force an immediate re-check instead of waiting for the next day,
+  delete `data/auto_update_state.json` and relaunch, or just run the
+  manual pipeline commands above directly (they're unaffected by this and
+  remain the way to do a one-off/attended update).
+
 ## Design notes & known limitations
 
 - **Clause/page citations**: chunks carry the PDF page(s) and clause/paragraph
