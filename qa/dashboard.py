@@ -11,6 +11,7 @@
 # qa/webapp.py stays as the minimal fallback UI.
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -32,7 +33,11 @@ st.set_page_config(
     page_title="Traffic Commercial Intelligence — Ministry of Railways",
     page_icon="🚆",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" (not "expanded"): Streamlit auto-collapses the sidebar on
+    # narrow/mobile viewports with this setting, but "expanded" forces it
+    # open regardless of screen size -- on a phone that means an overlay
+    # covering most of the screen and blocking the search box underneath.
+    initial_sidebar_state="auto",
 )
 
 # ---------------------------------------------------------------------------
@@ -252,6 +257,16 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
     color: var(--india-green) !important;
     border: 1px solid rgba(18, 136, 7, 0.3);
 }
+.status-badge.amended {
+    background: rgba(255, 153, 51, 0.12);
+    color: #b5691a !important;
+    border: 1px solid rgba(255, 153, 51, 0.4);
+}
+.status-badge.ambiguous {
+    background: rgba(100, 116, 139, 0.1);
+    color: #475569 !important;
+    border: 1px solid rgba(100, 116, 139, 0.35);
+}
 
 /* Streamlit widget restyle */
 .stTextInput input {
@@ -329,6 +344,34 @@ button[kind="primaryFormSubmit"], button[kind="primaryFormSubmit"] *,
 button[kind="secondaryFormSubmit"], button[kind="secondaryFormSubmit"] * {
     color: #ffffff !important;
 }
+
+/* Columns (source-link / download-button row on each citation card) should
+   stack instead of squeezing side by side on a narrow phone screen. */
+[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+
+/* ---- Mobile ---- */
+@media (max-width: 640px) {
+    .block-container { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+    .gov-strip-caption { font-size: 0.56rem; letter-spacing: 0.05em; padding: 0 0.5rem; }
+    .hero {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 1.1rem 1.1rem;
+        gap: 0.6rem;
+    }
+    .hero-mark { width: 46px; height: 46px; font-size: 1.3rem; }
+    .hero-eyebrow { font-size: 0.6rem; letter-spacing: 0.08em; }
+    .hero-title { font-size: 1.3rem; }
+    .hero-slogan { font-size: 0.85rem; }
+    .hero-slogan .hindi { display: block; margin-left: 0; margin-top: 0.15rem; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+    .stat-card { padding: 0.75rem 0.9rem; }
+    .stat-value { font-size: 1.3rem; }
+    .answer-panel { padding: 1.1rem 1.25rem; font-size: 0.95rem; }
+    .citation-card { padding: 0.75rem 0.9rem; }
+    .citation-title { font-size: 0.88rem; }
+    [data-testid="stHorizontalBlock"] > div { width: 100% !important; flex: 1 1 100% !important; }
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -356,6 +399,34 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+# ---------------------------------------------------------------------------
+# Password gate -- only enforced when DASHBOARD_PASSWORD is set (see
+# .env.example). Meant for when this dashboard is exposed via a tunnel
+# (ngrok, etc.) to a link being shared with someone else: without a gate,
+# anyone with the link could ask unlimited questions billed to your
+# ANTHROPIC_API_KEY. Checked BEFORE connecting to the database/vector store
+# below, so an unauthenticated visitor never even triggers backend I/O.
+# Local-only use (no DASHBOARD_PASSWORD set) is unaffected.
+# ---------------------------------------------------------------------------
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD")
+
+if DASHBOARD_PASSWORD and not st.session_state.get("authenticated"):
+    st.markdown(
+        '<div class="answer-panel">This dashboard is password-protected. '
+        'Enter the access password to continue.</div>',
+        unsafe_allow_html=True,
+    )
+    with st.form("password_gate"):
+        entered_password = st.text_input("Password", type="password")
+        submitted_password = st.form_submit_button("Enter")
+    if submitted_password:
+        if entered_password == DASHBOARD_PASSWORD:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -391,12 +462,16 @@ def _stats(conn):
     superseded = conn.execute(
         "SELECT COUNT(*) FROM documents WHERE superseded_by_doc_id IS NOT NULL AND superseded_by_doc_id != ''"
     ).fetchone()[0]
+    amended = conn.execute("SELECT COUNT(*) FROM chunks WHERE status = 'amended'").fetchone()[0]
     coverage_pct = round(100 * (total - flagged) / total, 1) if total else 0.0
     number_pct = round(100 * with_number / total, 1) if total else 0.0
-    return total, flagged, sections, chunks, coverage_pct, number_pct, superseded
+    return total, flagged, sections, chunks, coverage_pct, number_pct, superseded, amended
 
 
-total_docs, flagged_docs, sections_count, chunk_count, coverage_pct, number_pct, superseded_count = _stats(conn)
+(
+    total_docs, flagged_docs, sections_count, chunk_count,
+    coverage_pct, number_pct, superseded_count, amended_count,
+) = _stats(conn)
 
 st.markdown(
     f"""
@@ -424,6 +499,10 @@ st.markdown(
   <div class="stat-card c-red">
     <div class="stat-label">Superseded Rules Resolved</div>
     <div class="stat-value red">{superseded_count:,}</div>
+  </div>
+  <div class="stat-card c-saffron">
+    <div class="stat-label">Clauses Partially Amended</div>
+    <div class="stat-value saffron">{amended_count:,}</div>
   </div>
 </div>
 """,
@@ -488,11 +567,15 @@ if submitted and question.strip():
         clause = c.clause_ref or "none detected"
         page = page_label(c.page_start, c.page_end)
         letter_no = c.circular_number or "not detected"
-        status_badge = (
-            f'<div class="status-badge superseded">Superseded by {c.superseded_by_summary}</div>'
-            if c.superseded_by_summary
-            else '<div class="status-badge current">Current</div>'
-        )
+        status_labels = {
+            "superseded": "Superseded",
+            "amended": "Partially amended",
+            "ambiguous": "Conflicting signals",
+        }
+        if c.status in status_labels:
+            status_badge = f'<div class="status-badge {c.status}">{status_labels[c.status]}: {c.status_note}</div>'
+        else:
+            status_badge = '<div class="status-badge current">Current</div>'
         st.markdown(
             f"""
 <div class="citation-card">

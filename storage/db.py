@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     circular_number TEXT,
     superseded_by_doc_id TEXT,
     superseded_by_summary TEXT,
+    status TEXT DEFAULT 'current',
+    status_note TEXT,
     FOREIGN KEY (doc_id) REFERENCES documents(doc_id)
 );
 
@@ -70,6 +72,7 @@ CREATE TABLE IF NOT EXISTS supersession_refs (
     referenced_number TEXT,
     referenced_year TEXT,
     referenced_date_raw TEXT,
+    referenced_clause TEXT,
     matched_sentence TEXT,
     FOREIGN KEY (doc_id) REFERENCES documents(doc_id)
 );
@@ -97,6 +100,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     existing table (from before a column was added) needs it added in place
     so already-indexed data isn't lost or requires a full re-extraction."""
     existing_chunks = {row["name"] for row in conn.execute("PRAGMA table_info(chunks)")}
+    status_is_new = "status" not in existing_chunks
     for column, coltype in (
         ("clause_ref", "TEXT"),
         ("page_start", "INTEGER"),
@@ -104,9 +108,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("circular_number", "TEXT"),
         ("superseded_by_doc_id", "TEXT"),
         ("superseded_by_summary", "TEXT"),
+        ("status", "TEXT DEFAULT 'current'"),
+        ("status_note", "TEXT"),
     ):
         if column not in existing_chunks:
             conn.execute(f"ALTER TABLE chunks ADD COLUMN {column} {coltype}")
+    if status_is_new:
+        # One-time carry-over: a database indexed before per-chunk status
+        # existed may already have the older, whole-document-only
+        # superseded_by_doc_id/summary set (from an earlier resolve run) --
+        # fold that into the new status/status_note fields so it isn't lost.
+        conn.execute(
+            "UPDATE chunks SET status = 'superseded', status_note = superseded_by_summary "
+            "WHERE superseded_by_doc_id IS NOT NULL AND superseded_by_doc_id != ''"
+        )
 
     existing_documents = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
     for column, coltype in (
@@ -116,6 +131,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     ):
         if column not in existing_documents:
             conn.execute(f"ALTER TABLE documents ADD COLUMN {column} {coltype}")
+
+    existing_refs = {row["name"] for row in conn.execute("PRAGMA table_info(supersession_refs)")}
+    if "referenced_clause" not in existing_refs:
+        conn.execute("ALTER TABLE supersession_refs ADD COLUMN referenced_clause TEXT")
 
     conn.commit()
     _migrate_fts(conn)
@@ -197,10 +216,13 @@ def insert_chunks(conn: sqlite3.Connection, chunks: Iterable) -> None:
                 c.clause_ref, c.page_start, c.page_end, c.circular_number,
             ),
         )
-        # superseded_by_* is deliberately not set here: it's resolved later,
-        # across the whole corpus, by extraction.resolve_supersession (a doc
-        # can only be known to be superseded once the superseding doc has
-        # also been indexed, which may not be true yet at insert time).
+        # superseded_by_* and status/status_note are deliberately not set
+        # here: they're resolved later, across the whole corpus, by
+        # extraction.resolve_supersession (a document's status can only be
+        # known once every document that might reference it has also been
+        # indexed, which may not be true yet at insert time). Omitting them
+        # from the INSERT lets `status` fall back to its schema default
+        # ('current') and the rest to NULL, as intended for a fresh chunk.
         conn.execute(
             "INSERT INTO chunks_fts (chunk_id, text, title) VALUES (?, ?, ?)",
             (c.chunk_id, c.text, c.title),
@@ -213,22 +235,41 @@ def insert_supersession_refs(conn: sqlite3.Connection, doc_id: str, refs: Iterab
     for ref in refs:
         conn.execute(
             """INSERT INTO supersession_refs
-               (doc_id, relation, referenced_label, referenced_number, referenced_year, referenced_date_raw, matched_sentence)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (doc_id, relation, referenced_label, referenced_number, referenced_year, referenced_date_raw,
+                referenced_clause, matched_sentence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 doc_id, ref.relation, ref.referenced_label, ref.referenced_number,
-                ref.referenced_year, ref.referenced_date_raw, ref.matched_sentence,
+                ref.referenced_year, ref.referenced_date_raw, ref.referenced_clause, ref.matched_sentence,
             ),
         )
     conn.commit()
 
 
-def set_superseded(conn: sqlite3.Connection, doc_id: str, superseded_by_doc_id: str, summary: str) -> None:
-    """Record that `doc_id` has been superseded by `superseded_by_doc_id`,
-    resolved from supersession_refs by extraction/resolve_supersession.py.
-    Denormalized onto every chunk of `doc_id` too (mirroring the existing
-    circular_number pattern) so retrieval can filter/label per-chunk without
-    an extra join against `documents` at query time."""
+def set_chunk_status(conn: sqlite3.Connection, chunk_ids: list[str], status: str, status_note: str) -> None:
+    """Set the resolved supersession status for specific chunks -- the unit
+    of resolution is the chunk, not the document, so a partial amendment
+    (extraction.resolve_supersession) can mark just the affected clause's
+    chunks without touching the rest of the same document. `status` is one
+    of 'current' | 'superseded' | 'amended' | 'ambiguous'."""
+    conn.executemany(
+        "UPDATE chunks SET status = ?, status_note = ? WHERE chunk_id = ?",
+        [(status, status_note, cid) for cid in chunk_ids],
+    )
+    conn.commit()
+
+
+def set_document_superseded(conn: sqlite3.Connection, doc_id: str, superseded_by_doc_id: str, summary: str) -> None:
+    """Record that `doc_id` has been superseded *in its entirety* by
+    `superseded_by_doc_id` -- only called by extraction/resolve_supersession.py
+    once every one of `doc_id`'s chunks has independently resolved to
+    status='superseded' with no partial amendment/ambiguity among them (see
+    that module for the per-chunk resolution this rolls up from). This is a
+    document-level convenience field for whole-document UI/reporting (e.g.
+    the dashboard's "fully superseded" count) -- chunk-level `status` on
+    `chunks` remains the source of truth retrieval/answering actually use.
+    Also denormalized onto the document's chunks for backward compatibility
+    with the (now legacy, whole-document-only) superseded_by_* chunk columns."""
     conn.execute(
         "UPDATE documents SET superseded_by_doc_id = ?, superseded_by_summary = ? WHERE doc_id = ?",
         (superseded_by_doc_id, summary, doc_id),

@@ -34,17 +34,34 @@ e.g. "As per Commercial Circular No. 45 of 2019 dated 12.06.2019, Clause 3.2, pa
 If no clause number was detected for that excerpt, cite the page number alone \
 (e.g. "page 2"). If neither is available, cite circular/title/date only as in rule 2.
 
-4. Some excerpts are labeled "Status: SUPERSEDED by <circular>" -- this means the \
-knowledge base has confirmed that specific circular replaced this one. Treat it as an \
-old rule, not the current one: lead your answer with the current/superseding circular's \
-rule, and only mention the superseded one for historical context (e.g. "this was the \
-rule under Circular X until it was superseded by Circular Y, which now governs..."), \
-never as the primary answer. If multiple excerpts appear to conflict WITHOUT an explicit \
-"Status: SUPERSEDED" label, or an excerpt's own text states it supersedes, amends, or is \
-issued "in partial modification of" another circular not confirmed above, surface that \
-explicitly instead of silently picking one -- tell the user which is more recent (by \
-date) if determinable, and flag that supersession detection is heuristic and the user \
-may want to verify against the original documents.
+4. Some excerpts carry a Status line -- the knowledge base has already resolved these \
+against other indexed circulars, at the level of the specific clause each excerpt is \
+from, not just the whole document:
+   - "Status: SUPERSEDED by <circular>" -- this exact clause/passage was replaced in \
+full. Treat it as an old rule, not the current one: lead your answer with the \
+superseding circular's rule, and only mention this one for historical context (e.g. \
+"this was the rule under Circular X until it was superseded by Circular Y, which now \
+governs..."), never as the primary answer.
+   - "Status: AMENDED by <circular>" -- ONLY this specific clause was changed by a later \
+circular; the rest of this document (its other clauses/excerpts) remains in force \
+unless separately marked otherwise. COMBINE both in your answer: state the current rule \
+using the amendment for this clause, and other clauses from this same circular (if also \
+retrieved, with no Status line of their own) as still valid -- do not treat the whole \
+document as replaced just because one clause was amended.
+   - "Status: AMBIGUOUS -- <details>" -- the knowledge base found conflicting \
+supersession signals for this exact passage (e.g. one document claims to fully replace \
+it while another, differently dated, claims to have only amended it) and deliberately \
+did not pick one. Tell the user about the conflict explicitly and recommend verifying \
+against the original documents rather than asserting either version as current.
+   - No Status line at all means nothing in the index contradicts this excerpt -- treat \
+it as current.
+   If excerpts conflict WITHOUT any of the above Status labels (i.e. the knowledge base's \
+own detection didn't catch it, but the text itself suggests a conflict, or an excerpt's \
+own text states it supersedes/amends/is issued "in partial modification of" another \
+circular not reflected in a Status line), surface that explicitly instead of silently \
+picking one -- tell the user which is more recent (by date) if determinable, and flag \
+that supersession detection is heuristic and the user may want to verify against the \
+original documents.
 
 5. If asked to list/summarize many circulars, cover every relevant one shown in the \
 excerpts you were given -- do not stop at the first few.
@@ -71,7 +88,8 @@ class Citation:
     page_start: Optional[int] = None
     page_end: Optional[int] = None
     circular_number: str = ""
-    superseded_by_summary: str = ""
+    status: str = "current"
+    status_note: str = ""
 
 
 @dataclass
@@ -90,10 +108,24 @@ def page_label(page_start: Optional[int], page_end: Optional[int]) -> str:
     return str(page_start)
 
 
+_STATUS_LABELS = {
+    "superseded": "SUPERSEDED by",
+    "amended": "AMENDED by",
+    "ambiguous": "AMBIGUOUS --",
+}
+
+
+def _status_line(status: str, status_note: str) -> str:
+    if status == "current" or not status_note:
+        return ""
+    label = _STATUS_LABELS.get(status, status.upper())
+    return f"Status: {label} {status_note}\n"
+
+
 def _format_context(chunks: list[RetrievedChunk]) -> str:
     blocks = []
     for i, c in enumerate(chunks, start=1):
-        status_line = f"Status: SUPERSEDED by {c.superseded_by_summary}\n" if c.superseded_by_summary else ""
+        status_line = _status_line(c.status, c.status_note)
         blocks.append(
             f"[Excerpt {i}]\n"
             f"Title: {c.title}\n"
@@ -163,7 +195,8 @@ def answer_question(
             page_start=c.page_start,
             page_end=c.page_end,
             circular_number=c.circular_number,
-            superseded_by_summary=c.superseded_by_summary,
+            status=c.status,
+            status_note=c.status_note,
         )
         for c in chunks
     ]

@@ -1,4 +1,4 @@
-from extraction.supersession import find_supersession_refs
+from extraction.supersession import FULL_RELATIONS, INFORMATIONAL_RELATIONS, PARTIAL_RELATIONS, find_supersession_refs
 
 
 def test_detects_supersession_pattern():
@@ -13,6 +13,7 @@ def test_detects_supersession_pattern():
     assert ref.referenced_number == "5"
     assert ref.referenced_year == "2018"
     assert ref.referenced_date_raw == "01.01.2018"
+    assert ref.referenced_clause is None
 
 
 def test_detects_partial_modification_pattern():
@@ -21,6 +22,32 @@ def test_detects_partial_modification_pattern():
     assert len(refs) == 1
     assert refs[0].relation == "partial_modification"
     assert refs[0].referenced_number == "45/2019"
+
+
+def test_detects_clause_scoped_partial_modification():
+    text = "In partial modification of Clause 4 of Circular No. TC-I/2019/1 dated 01.01.2019, the rate is revised."
+    refs = find_supersession_refs(text)
+    assert len(refs) == 1
+    assert refs[0].relation == "partial_modification"
+    assert refs[0].referenced_clause == "4"
+
+
+def test_detects_dotted_clause_and_para_variants():
+    text = "This circular amends Para 3.2 of Circular No. 9 of 2017 dated 05.05.2017."
+    refs = find_supersession_refs(text)
+    assert len(refs) == 1
+    assert refs[0].relation == "amendment"
+    assert refs[0].referenced_clause == "3.2"
+
+
+def test_relation_bucket_constants_are_consistent():
+    all_relations = FULL_RELATIONS | PARTIAL_RELATIONS | INFORMATIONAL_RELATIONS
+    assert all_relations == {
+        "supersession", "partial_modification", "modification", "amendment", "continuation",
+    }
+    assert FULL_RELATIONS & PARTIAL_RELATIONS == set()
+    assert FULL_RELATIONS & INFORMATIONAL_RELATIONS == set()
+    assert PARTIAL_RELATIONS & INFORMATIONAL_RELATIONS == set()
 
 
 def test_detects_amendment_pattern():

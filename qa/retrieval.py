@@ -38,8 +38,8 @@ class RetrievedChunk:
     page_start: Optional[int] = None
     page_end: Optional[int] = None
     circular_number: str = ""
-    superseded_by_doc_id: str = ""
-    superseded_by_summary: str = ""
+    status: str = "current"  # current | superseded | amended | ambiguous
+    status_note: str = ""
 
 
 def is_exhaustive_query(question: str) -> bool:
@@ -89,8 +89,8 @@ def retrieve(
                     page_start=meta.get("page_start") or None,
                     page_end=meta.get("page_end") or None,
                     circular_number=meta.get("circular_number", "") or "",
-                    superseded_by_doc_id=meta.get("superseded_by_doc_id", "") or "",
-                    superseded_by_summary=meta.get("superseded_by_summary", "") or "",
+                    status=meta.get("status", "") or "current",
+                    status_note=meta.get("status_note", "") or "",
                 )
         except Exception:
             pass  # vector store unavailable -> fall through to keyword-only
@@ -115,21 +115,27 @@ def retrieve(
             page_start=row["page_start"] if "page_start" in row.keys() else None,
             page_end=row["page_end"] if "page_end" in row.keys() else None,
             circular_number=row["circular_number"] or "" if "circular_number" in row.keys() else "",
-            superseded_by_doc_id=row["superseded_by_doc_id"] or "" if "superseded_by_doc_id" in row.keys() else "",
-            superseded_by_summary=row["superseded_by_summary"] or "" if "superseded_by_summary" in row.keys() else "",
+            status=(row["status"] or "current") if "status" in row.keys() else "current",
+            status_note=row["status_note"] or "" if "status_note" in row.keys() else "",
         )
 
     ordered = sorted(results.values(), key=lambda r: r.score, reverse=True)
     if not exhaustive:
-        # Prefer current (non-superseded) circulars in the default "specific"
-        # mode so a superseded rule doesn't crowd a stale answer into the
+        # Prefer non-fully-superseded chunks in the default "specific" mode
+        # so an old, replaced rule doesn't crowd a stale answer into the
         # top_n cutoff -- but never drop to zero results just because
         # everything relevant happens to be superseded (e.g. the successor
         # wasn't indexed, or resolution is incomplete): fall back to the
         # unfiltered set rather than hide a possibly-still-useful answer.
-        # Exhaustive mode always keeps every match, superseded or not, since
-        # its purpose is a complete list/audit trail, not "the current rule".
-        current_only = [r for r in ordered if not r.superseded_by_doc_id]
+        # 'amended' and 'ambiguous' chunks are always kept even here: an
+        # 'amended' chunk's clause may be the ONLY current source for that
+        # specific clause (the rest of its document is unaffected), and an
+        # 'ambiguous' chunk is exactly the kind of conflict that needs to
+        # reach the user/Claude rather than be silently dropped.
+        # Exhaustive mode always keeps every match regardless of status,
+        # since its purpose is a complete list/audit trail, not "the
+        # current rule".
+        current_only = [r for r in ordered if r.status != "superseded"]
         ordered = (current_only if current_only else ordered)[:top_n]
 
     mode = "exhaustive" if exhaustive else "specific"
