@@ -73,7 +73,16 @@ extracted from this document by OCR...]" -- this means a real, indexed circular 
 and is relevant by title/date/section, but its content could not be automatically read. \
 Tell the user such a circular appears relevant and point them to the original PDF; do \
 NOT treat the placeholder as if the circular contains no policy, and do NOT say "no \
-matching circular found" when a placeholder excerpt was retrieved."""
+matching circular found" when a placeholder excerpt was retrieved.
+
+8. This may be a continuing conversation -- earlier questions and answers may appear \
+before the current one. You may refer back to them for conversational continuity (e.g. \
+"as mentioned above..."), but every NEW factual claim in your answer must still be \
+grounded in the excerpts provided WITH THIS question, cited per the rules above -- never \
+answer a follow-up purely from memory of an earlier turn without re-grounding it in the \
+excerpts you were just given. If this turn's excerpts don't cover the follow-up, say so \
+explicitly rather than reusing an earlier answer's citation for a claim it doesn't \
+actually support."""
 
 
 @dataclass
@@ -98,6 +107,14 @@ class Answer:
     citations: list[Citation]
     mode: str
     model: str
+    # The exact API message objects for this turn (user question + assistant
+    # reply), in the shape the Anthropic `messages` param expects. Callers
+    # doing multi-turn chat should append these to their running history and
+    # pass that history back in as `conversation_history` on the next call --
+    # see qa/dashboard.py. Single source of truth for the turn's exact
+    # content/cache_control placement, so a caller never has to reconstruct
+    # it (and risk a byte mismatch that would silently break caching).
+    history_entries: Optional[list[dict]] = None
 
 
 def page_label(page_start: Optional[int], page_end: Optional[int]) -> str:
@@ -157,22 +174,38 @@ def answer_question(
     mode: str = "specific",
     model: str | None = None,
     api_key: str | None = None,
+    conversation_history: Optional[list[dict]] = None,
 ) -> Answer:
-    """Call the Anthropic API to answer `question` using only `chunks`."""
+    """Call the Anthropic API to answer `question` using only `chunks`.
+
+    `conversation_history` (optional): prior turns as a list of Anthropic
+    `messages`-shaped dicts, for a continuing chat -- see
+    Answer.history_entries. Each turn's excerpts are still grounded fresh
+    (rule 8 in SYSTEM_PROMPT); history is for conversational continuity,
+    not a substitute for re-retrieving/re-citing on every question."""
     import anthropic  # lazy import
 
     model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
+    user_message = build_user_message(question, chunks)
+    # cache_control on the latest turn's content: in a multi-turn
+    # conversation this lets the NEXT call reuse everything up to here from
+    # cache instead of reprocessing the whole growing history each time. See
+    # shared/prompt-caching.md "Multi-turn conversations" placement pattern.
+    user_turn = {"role": "user", "content": [{"type": "text", "text": user_message, "cache_control": {"type": "ephemeral"}}]}
+
     if not chunks:
+        answer_text = "No matching circular found in the indexed documents for this query."
         return Answer(
-            text="No matching circular found in the indexed documents for this query.",
+            text=answer_text,
             citations=[],
             mode=mode,
             model=model,
+            history_entries=[user_turn, {"role": "assistant", "content": answer_text}],
         )
 
-    user_message = build_user_message(question, chunks)
+    messages = list(conversation_history or []) + [user_turn]
     response = client.messages.create(
         model=model,
         max_tokens=2048,
@@ -182,7 +215,7 @@ def answer_question(
         # behavior; below the model's minimum cacheable prefix it's simply
         # a no-op (no error, cache_creation_input_tokens stays 0).
         system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user_message}],
+        messages=messages,
     )
 
     text_parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
@@ -206,4 +239,10 @@ def answer_question(
         for c in chunks
     ]
 
-    return Answer(text=answer_text, citations=citations, mode=mode, model=model)
+    return Answer(
+        text=answer_text,
+        citations=citations,
+        mode=mode,
+        model=model,
+        history_entries=[user_turn, {"role": "assistant", "content": answer_text}],
+    )

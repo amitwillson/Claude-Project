@@ -1,4 +1,4 @@
-from qa.retrieval import retrieve
+from qa.retrieval import build_conversational_query, retrieve
 from storage import db as storedb
 
 
@@ -97,3 +97,12 @@ def test_exhaustive_mode_keeps_superseded_chunks(tmp_path):
     ids = [c.chunk_id for c in chunks]
     assert "old::0" in ids and "new::0" in ids
     conn.close()
+
+
+def test_build_conversational_query_returns_question_as_is_with_no_prior_turn():
+    assert build_conversational_query("What is the refund policy?", None) == "What is the refund policy?"
+
+
+def test_build_conversational_query_prepends_the_previous_question():
+    query = build_conversational_query("What about clause 5?", "What is the refund policy?")
+    assert query == "What is the refund policy?\nWhat about clause 5?"

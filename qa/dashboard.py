@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 from extraction import auto_update
 from qa.answer import answer_question, page_label
-from qa.retrieval import retrieve
+from qa.retrieval import build_conversational_query, is_exhaustive_query, retrieve
 from storage import db as storedb
 
 load_dotenv()
@@ -544,14 +544,28 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# Search
+# Chat
+#
+# A continuing conversation, not one-shot Q&A: st.session_state.chat_turns
+# holds what's rendered on screen (question/answer/citations per turn),
+# while st.session_state.api_history holds the parallel Anthropic
+# `messages`-shaped history (Answer.history_entries from qa/answer.py) that
+# gets passed back in as conversation_history= on every follow-up, so Claude
+# sees the whole conversation, not just the latest question in isolation.
+# Retrieval for a follow-up uses build_conversational_query() to fold in the
+# previous question -- a bare "what about clause 5?" has no retrieval signal
+# of its own. Every turn still gets fresh, independently-grounded citations
+# (SYSTEM_PROMPT rule 8) -- history is for conversational continuity, not a
+# substitute for re-citing.
 # ---------------------------------------------------------------------------
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "chat_turns" not in st.session_state:
+    st.session_state.chat_turns = []  # [{"role", "text", "mode"?, "model"?, "chunks"?}]
+if "api_history" not in st.session_state:
+    st.session_state.api_history = []
 
 with st.sidebar:
     st.markdown("### Session")
-    st.caption("Answers are generated only from indexed circulars. Every claim is cited; if a circular has been superseded, the current one is cited first and the old one is marked accordingly.")
+    st.caption("Answers are generated only from indexed circulars. Every claim is cited; if a circular has been superseded, the current one is cited first and the old one is marked accordingly. Follow-up questions continue this same conversation.")
 
     st.markdown("### Auto-update")
     auto_update_state = auto_update.read_status()
@@ -562,60 +576,39 @@ with st.sidebar:
     icon = _auto_update_icons.get(auto_update_state.status, "⏳")
     st.caption(f"{icon} {auto_update_state.detail or 'Checking for new circulars...'}")
 
-    if st.session_state.history:
-        st.markdown("**Recent questions**")
-        for q in reversed(st.session_state.history[-8:]):
-            st.markdown(f"- {q}")
-
-with st.form("ask_form"):
-    question = st.text_input(
-        "Ask a question about Traffic Commercial circulars",
-        placeholder="e.g. What is the current policy on refund of unused tickets?",
-    )
+    st.markdown("### Retrieval mode")
     mode_choice = st.radio(
         "Retrieval mode",
         ["Auto-detect", "Specific (fast)", "Exhaustive (list all / summarize all)"],
-        horizontal=True,
+        label_visibility="collapsed",
     )
-    submitted = st.form_submit_button("Ask")
 
-if submitted and question.strip():
-    st.session_state.history.append(question.strip())
+    if st.session_state.chat_turns and st.button("Start new conversation"):
+        st.session_state.chat_turns = []
+        st.session_state.api_history = []
+        st.rerun()
 
-    exhaustive = None
-    if mode_choice.startswith("Specific"):
-        exhaustive = False
-    elif mode_choice.startswith("Exhaustive"):
-        exhaustive = True
+    user_questions = [t["text"] for t in st.session_state.chat_turns if t["role"] == "user"]
+    if user_questions:
+        st.markdown("**Recent questions**")
+        for q in reversed(user_questions[-8:]):
+            st.markdown(f"- {q}")
 
-    with st.spinner("Retrieving relevant circulars..."):
-        chunks, mode = retrieve(question, conn, vector_store=vector_store, embedder=embedder, exhaustive=exhaustive)
 
-    with st.spinner("Asking Claude..."):
-        try:
-            answer = answer_question(question, chunks, mode=mode)
-        except Exception as exc:
-            st.error(f"Failed to get an answer: {exc}")
-            st.stop()
-
-    st.markdown(
-        f'<span class="mode-chip">{answer.mode}</span><span class="mode-chip">{answer.model}</span>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(f'<div class="answer-panel">{answer.text}</div>', unsafe_allow_html=True)
-
+def _render_citations(chunks: list, turn_index: int) -> None:
     st.markdown("#### Sources")
     if not chunks:
         st.caption("No chunks were retrieved for this question.")
+        return
+    status_labels = {
+        "superseded": "Superseded",
+        "amended": "Partially amended",
+        "ambiguous": "Conflicting signals",
+    }
     for i, c in enumerate(chunks, start=1):
         clause = c.clause_ref or "none detected"
         page = page_label(c.page_start, c.page_end)
         letter_no = c.circular_number or "not detected"
-        status_labels = {
-            "superseded": "Superseded",
-            "amended": "Partially amended",
-            "ambiguous": "Conflicting signals",
-        }
         if c.status in status_labels:
             status_badge = f'<div class="status-badge {c.status}">{status_labels[c.status]}: {c.status_note}</div>'
         else:
@@ -640,9 +633,61 @@ if submitted and question.strip():
                     data=pdf_path.read_bytes(),
                     file_name=pdf_path.name,
                     mime="application/pdf",
-                    key=f"dl_{c.chunk_id}",
+                    key=f"dl_{turn_index}_{c.chunk_id}",
                 )
         with col2:
             st.markdown(f"[Source on railwayboard site]({c.source_url})")
         with st.expander("Excerpt text"):
             st.text(c.text)
+
+
+for turn_index, turn in enumerate(st.session_state.chat_turns):
+    with st.chat_message(turn["role"]):
+        if turn["role"] == "assistant":
+            st.markdown(
+                f'<span class="mode-chip">{turn.get("mode", "")}</span>'
+                f'<span class="mode-chip">{turn.get("model", "")}</span>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f'<div class="answer-panel">{turn["text"]}</div>', unsafe_allow_html=True)
+            _render_citations(turn.get("chunks", []), turn_index)
+        else:
+            st.markdown(turn["text"])
+
+prompt = st.chat_input("Ask a question about Traffic Commercial circulars")
+if prompt and prompt.strip():
+    question = prompt.strip()
+    st.session_state.chat_turns.append({"role": "user", "text": question})
+
+    if mode_choice.startswith("Specific"):
+        exhaustive = False
+    elif mode_choice.startswith("Exhaustive"):
+        exhaustive = True
+    else:
+        exhaustive = is_exhaustive_query(question)  # auto-detect from the new question alone
+
+    previous_question = next(
+        (t["text"] for t in reversed(st.session_state.chat_turns[:-1]) if t["role"] == "user"), None
+    )
+    retrieval_query = build_conversational_query(question, previous_question)
+
+    with st.spinner("Retrieving relevant circulars..."):
+        chunks, mode = retrieve(
+            retrieval_query, conn, vector_store=vector_store, embedder=embedder, exhaustive=exhaustive
+        )
+
+    with st.spinner("Asking Claude..."):
+        try:
+            answer = answer_question(
+                question, chunks, mode=mode, conversation_history=st.session_state.api_history
+            )
+        except Exception as exc:
+            st.session_state.chat_turns.append(
+                {"role": "assistant", "text": f"Failed to get an answer: {exc}", "mode": mode, "model": "", "chunks": []}
+            )
+        else:
+            st.session_state.api_history.extend(answer.history_entries)
+            st.session_state.chat_turns.append(
+                {"role": "assistant", "text": answer.text, "mode": answer.mode, "model": answer.model, "chunks": chunks}
+            )
+    st.rerun()

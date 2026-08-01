@@ -237,6 +237,24 @@ takes real time even when nothing's new, so it's gated by a state file
   the `chunk_id` join always came back NULL. Fixed in `storage/db.py`, with
   an in-place migration that rebuilds an already-populated database's FTS
   index from `chunks` on next connect -- no re-extraction needed.)
+- **Continuing chat, not one-shot Q&A** (`qa/dashboard.py`): the dashboard is
+  a real multi-turn chat -- a follow-up like "what about clause 5?" continues
+  the same conversation rather than starting from nothing. Two things make
+  this work together:
+  - **Retrieval**: `qa.retrieval.build_conversational_query()` folds the
+    previous question into a follow-up's retrieval query, since a
+    pronoun-heavy follow-up on its own carries almost no retrieval signal
+    (a bare "is that still current?" would otherwise match nothing).
+  - **Answering**: `qa.answer.answer_question()` takes an optional
+    `conversation_history` (prior turns, in the Anthropic API's own message
+    shape) so Claude sees the whole conversation. Every turn's excerpts are
+    still retrieved and cited fresh, though -- the system prompt (rule 8)
+    explicitly forbids answering a follow-up purely from memory of an
+    earlier turn without re-grounding it in this turn's excerpts, and says
+    so explicitly if this turn's excerpts don't cover it.
+  Click "Start new conversation" in the sidebar to reset and start fresh.
+  This only applies to the branded dashboard for now -- `qa/ask.py` and
+  `qa/webapp.py` remain single-question tools.
 - **Old binary `.doc`/`.xls` files** (pre-2007 binary Office formats) have no
   reliable pure-Python extractor in this stack and are flagged
   `needs_review` with empty text rather than silently dropped.

@@ -46,6 +46,20 @@ def is_exhaustive_query(question: str) -> bool:
     return any(pattern.search(question) for pattern in _EXHAUSTIVE_TRIGGERS)
 
 
+def build_conversational_query(question: str, previous_question: Optional[str]) -> str:
+    """Augment a follow-up question with the immediately preceding one for
+    retrieval purposes only -- a short, pronoun-heavy follow-up like "what
+    about clause 5?" or "is that still current?" carries almost no
+    retrieval signal on its own and would otherwise return nothing relevant.
+    Simple concatenation rather than an LLM query-rewrite step: no extra API
+    call, and FTS5/vector search both tolerate a little extra context fine.
+    The raw `question` (not this augmented form) is still what's shown to
+    Claude for answering -- this only shapes what gets retrieved."""
+    if not previous_question:
+        return question
+    return f"{previous_question}\n{question}"
+
+
 def retrieve(
     question: str,
     conn: sqlite3.Connection,
