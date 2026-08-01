@@ -1,4 +1,8 @@
-from qa.answer import _format_context
+import types
+
+import anthropic
+
+from qa.answer import answer_question, _format_context
 from qa.retrieval import RetrievedChunk
 
 
@@ -28,3 +32,107 @@ def test_context_includes_ambiguous_status_line():
 def test_context_omits_status_line_when_current():
     context = _format_context([_chunk()])
     assert "Status:" not in context
+
+
+class _FakeMessages:
+    def __init__(self, capture, reply_text):
+        self._capture = capture
+        self._reply_text = reply_text
+
+    def create(self, **kwargs):
+        self._capture.append(kwargs)
+        return types.SimpleNamespace(content=[types.SimpleNamespace(type="text", text=self._reply_text)])
+
+
+class _FakeAnthropicClient:
+    def __init__(self, capture, reply_text, *a, **k):
+        self.messages = _FakeMessages(capture, reply_text)
+
+
+def test_first_turn_sends_no_prior_history(monkeypatch):
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "First answer."))
+
+    answer = answer_question("What is the refund policy?", [_chunk()])
+
+    assert len(capture[0]["messages"]) == 1  # only this turn, no history yet
+    assert answer.text == "First answer."
+    assert [e["role"] for e in answer.history_entries] == ["user", "assistant"]
+
+
+def test_follow_up_includes_prior_turns_in_the_request(monkeypatch):
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Second answer."))
+
+    prior_history = [
+        {"role": "user", "content": "Retrieved excerpts:\n\n...\n\nQuestion: first?"},
+        {"role": "assistant", "content": "First answer."},
+    ]
+    answer = answer_question("And clause 5?", [_chunk()], conversation_history=prior_history)
+
+    sent_messages = capture[0]["messages"]
+    assert len(sent_messages) == 3  # 2 prior turns + this new user turn
+    assert sent_messages[0] == prior_history[0]
+    assert sent_messages[1] == prior_history[1]
+    assert sent_messages[2]["role"] == "user"
+    assert answer.history_entries[1]["content"] == "Second answer."
+
+
+def test_latest_request_turn_carries_cache_control(monkeypatch):
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
+
+    answer_question("What is the refund policy?", [_chunk()])
+
+    sent_user_turn = capture[0]["messages"][-1]
+    assert sent_user_turn["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_stored_history_entries_do_not_carry_cache_control(monkeypatch):
+    """Regression test: history_entries is what gets threaded back in as
+    conversation_history on the next call. If it carried cache_control (the
+    marker each turn had when IT was the newest one), a several-question
+    conversation would accumulate more than the API's 4-breakpoint-per-
+    request limit and start failing with a 400."""
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
+
+    answer = answer_question("What is the refund policy?", [_chunk()])
+
+    user_turn = answer.history_entries[0]
+    assert isinstance(user_turn["content"], str)  # plain, not a cache_control-bearing block list
+
+
+def test_cache_breakpoints_stay_within_api_limit_across_a_long_conversation(monkeypatch):
+    """A 6-question conversation should never send more than the API's max
+    of 4 cache_control breakpoints in a single request (1 for the system
+    prompt + 1 for the latest turn, regardless of history length)."""
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
+
+    history: list[dict] = []
+    for i in range(6):
+        answer = answer_question(f"Question {i}?", [_chunk()], conversation_history=history)
+        history.extend(answer.history_entries)
+
+    for call in capture:
+        breakpoints = sum(
+            1
+            for m in call["messages"]
+            if isinstance(m["content"], list)
+            for block in m["content"]
+            if "cache_control" in block
+        )
+        breakpoints += 1  # the system prompt's own breakpoint, not in "messages"
+        assert breakpoints <= 4, f"request exceeded the API's cache_control breakpoint limit: {breakpoints}"
+
+
+def test_no_chunks_still_returns_history_entries_without_calling_the_api(monkeypatch):
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "unused"))
+
+    answer = answer_question("Some obscure question", [])
+
+    assert capture == []  # messages.create never called -- no chunks means no API call
+    assert answer.text == "No matching circular found in the indexed documents for this query."
+    assert [e["role"] for e in answer.history_entries] == ["user", "assistant"]

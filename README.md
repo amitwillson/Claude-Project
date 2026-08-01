@@ -94,6 +94,36 @@ Re-running `run_scraper` / `run_extract` is safe and incremental: the
 scraper skips documents already on disk (resumable), and extraction skips
 documents whose SHA1 hasn't changed since the last run.
 
+### Auto-update on dashboard launch
+
+`streamlit run qa/dashboard.py` no longer requires manually re-running the
+steps above to pick up new circulars. On launch it starts the whole
+pipeline above (scrape → extract → resolve supersession → paid Claude
+vision OCR for whatever's still unreadable) in a background thread, at
+most **once per day** (`extraction/auto_update.py`) -- a full site crawl
+takes real time even when nothing's new, so it's gated by a state file
+(`data/auto_update_state.json`) rather than running on every launch.
+- Runs in the background, non-blocking: the dashboard opens immediately
+  with the existing index; a status line in the sidebar ("Auto-update")
+  shows progress and updates on your next interaction.
+- Still needs the same Indian network connection as a manual
+  `run_scraper` call -- if that's unavailable, the check fails gracefully
+  (shown in the sidebar) and the existing index is untouched; nothing
+  about a failed check ever breaks the running dashboard.
+- The paid Claude-vision-OCR fallback step runs automatically too, capped
+  at `MAX_VISION_OCR_PER_RUN` (20) *documents* per check as a spend safety
+  limit -- a larger backlog is cleared gradually over several days'
+  checks rather than in one unbounded, no-confirmation API bill. Note this
+  caps documents, not API calls: each document can be up to 30 pages (one
+  API call per page, see `extraction/claude_vision_ocr.py`), so the actual
+  worst case per automatic run is closer to 600 page-transcription calls,
+  not 20 -- in practice this rarely binds, since only a small fraction of
+  documents ever need this fallback at all.
+- To force an immediate re-check instead of waiting for the next day,
+  delete `data/auto_update_state.json` and relaunch, or just run the
+  manual pipeline commands above directly (they're unaffected by this and
+  remain the way to do a one-off/attended update).
+
 ## Design notes & known limitations
 
 - **Clause/page citations**: chunks carry the PDF page(s) and clause/paragraph
@@ -212,6 +242,24 @@ documents whose SHA1 hasn't changed since the last run.
   the `chunk_id` join always came back NULL. Fixed in `storage/db.py`, with
   an in-place migration that rebuilds an already-populated database's FTS
   index from `chunks` on next connect -- no re-extraction needed.)
+- **Continuing chat, not one-shot Q&A** (`qa/dashboard.py`): the dashboard is
+  a real multi-turn chat -- a follow-up like "what about clause 5?" continues
+  the same conversation rather than starting from nothing. Two things make
+  this work together:
+  - **Retrieval**: `qa.retrieval.build_conversational_query()` folds the
+    previous question into a follow-up's retrieval query, since a
+    pronoun-heavy follow-up on its own carries almost no retrieval signal
+    (a bare "is that still current?" would otherwise match nothing).
+  - **Answering**: `qa.answer.answer_question()` takes an optional
+    `conversation_history` (prior turns, in the Anthropic API's own message
+    shape) so Claude sees the whole conversation. Every turn's excerpts are
+    still retrieved and cited fresh, though -- the system prompt (rule 8)
+    explicitly forbids answering a follow-up purely from memory of an
+    earlier turn without re-grounding it in this turn's excerpts, and says
+    so explicitly if this turn's excerpts don't cover it.
+  Click "Start new conversation" in the sidebar to reset and start fresh.
+  This only applies to the branded dashboard for now -- `qa/ask.py` and
+  `qa/webapp.py` remain single-question tools.
 - **Old binary `.doc`/`.xls` files** (pre-2007 binary Office formats) have no
   reliable pure-Python extractor in this stack and are flagged
   `needs_review` with empty text rather than silently dropped.
