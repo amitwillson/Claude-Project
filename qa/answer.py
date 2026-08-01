@@ -189,11 +189,13 @@ def answer_question(
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
     user_message = build_user_message(question, chunks)
-    # cache_control on the latest turn's content: in a multi-turn
-    # conversation this lets the NEXT call reuse everything up to here from
-    # cache instead of reprocessing the whole growing history each time. See
-    # shared/prompt-caching.md "Multi-turn conversations" placement pattern.
-    user_turn = {"role": "user", "content": [{"type": "text", "text": user_message, "cache_control": {"type": "ephemeral"}}]}
+    # Stored/replayed in plain form (no cache_control) -- this is what goes
+    # into Answer.history_entries and gets threaded back in as next turn's
+    # conversation_history. Deliberately NOT cached here: the API caps a
+    # request at 4 cache_control breakpoints total, and if every past turn
+    # kept the marker it was tagged with when it was the newest turn, a
+    # 4-5 question conversation would exceed that cap and start 400ing.
+    user_turn = {"role": "user", "content": user_message}
 
     if not chunks:
         answer_text = "No matching circular found in the indexed documents for this query."
@@ -205,7 +207,19 @@ def answer_question(
             history_entries=[user_turn, {"role": "assistant", "content": answer_text}],
         )
 
-    messages = list(conversation_history or []) + [user_turn]
+    # cache_control goes on the LATEST turn only, for THIS request -- never
+    # persisted into history_entries above. Each subsequent call re-applies
+    # it fresh to whatever is newest, so the request always carries exactly
+    # one breakpoint here (plus one for the system prompt) regardless of how
+    # long the conversation grows. Per shared/prompt-caching.md "Multi-turn
+    # conversations": a breakpoint on the latest turn is enough for the next
+    # call to reuse the whole prior prefix -- earlier turns don't need their
+    # own marker for that to work.
+    cached_user_turn = {
+        "role": "user",
+        "content": [{"type": "text", "text": user_message, "cache_control": {"type": "ephemeral"}}],
+    }
+    messages = list(conversation_history or []) + [cached_user_turn]
     response = client.messages.create(
         model=model,
         max_tokens=2048,

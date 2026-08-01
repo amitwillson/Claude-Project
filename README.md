@@ -111,9 +111,14 @@ takes real time even when nothing's new, so it's gated by a state file
   (shown in the sidebar) and the existing index is untouched; nothing
   about a failed check ever breaks the running dashboard.
 - The paid Claude-vision-OCR fallback step runs automatically too, capped
-  at `MAX_VISION_OCR_PER_RUN` (20) documents per check as a spend safety
+  at `MAX_VISION_OCR_PER_RUN` (20) *documents* per check as a spend safety
   limit -- a larger backlog is cleared gradually over several days'
-  checks rather than in one unbounded, no-confirmation API bill.
+  checks rather than in one unbounded, no-confirmation API bill. Note this
+  caps documents, not API calls: each document can be up to 30 pages (one
+  API call per page, see `extraction/claude_vision_ocr.py`), so the actual
+  worst case per automatic run is closer to 600 page-transcription calls,
+  not 20 -- in practice this rarely binds, since only a small fraction of
+  documents ever need this fallback at all.
 - To force an immediate re-check instead of waiting for the next day,
   delete `data/auto_update_state.json` and relaunch, or just run the
   manual pipeline commands above directly (they're unaffected by this and

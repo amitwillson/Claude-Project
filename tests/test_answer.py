@@ -65,7 +65,7 @@ def test_follow_up_includes_prior_turns_in_the_request(monkeypatch):
     monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Second answer."))
 
     prior_history = [
-        {"role": "user", "content": [{"type": "text", "text": "Retrieved excerpts:\n\n...\n\nQuestion: first?"}]},
+        {"role": "user", "content": "Retrieved excerpts:\n\n...\n\nQuestion: first?"},
         {"role": "assistant", "content": "First answer."},
     ]
     answer = answer_question("And clause 5?", [_chunk()], conversation_history=prior_history)
@@ -78,14 +78,53 @@ def test_follow_up_includes_prior_turns_in_the_request(monkeypatch):
     assert answer.history_entries[1]["content"] == "Second answer."
 
 
-def test_user_turn_carries_cache_control_for_multi_turn_caching(monkeypatch):
+def test_latest_request_turn_carries_cache_control(monkeypatch):
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
+
+    answer_question("What is the refund policy?", [_chunk()])
+
+    sent_user_turn = capture[0]["messages"][-1]
+    assert sent_user_turn["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_stored_history_entries_do_not_carry_cache_control(monkeypatch):
+    """Regression test: history_entries is what gets threaded back in as
+    conversation_history on the next call. If it carried cache_control (the
+    marker each turn had when IT was the newest one), a several-question
+    conversation would accumulate more than the API's 4-breakpoint-per-
+    request limit and start failing with a 400."""
     capture = []
     monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
 
     answer = answer_question("What is the refund policy?", [_chunk()])
 
     user_turn = answer.history_entries[0]
-    assert user_turn["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert isinstance(user_turn["content"], str)  # plain, not a cache_control-bearing block list
+
+
+def test_cache_breakpoints_stay_within_api_limit_across_a_long_conversation(monkeypatch):
+    """A 6-question conversation should never send more than the API's max
+    of 4 cache_control breakpoints in a single request (1 for the system
+    prompt + 1 for the latest turn, regardless of history length)."""
+    capture = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: _FakeAnthropicClient(capture, "Answer."))
+
+    history: list[dict] = []
+    for i in range(6):
+        answer = answer_question(f"Question {i}?", [_chunk()], conversation_history=history)
+        history.extend(answer.history_entries)
+
+    for call in capture:
+        breakpoints = sum(
+            1
+            for m in call["messages"]
+            if isinstance(m["content"], list)
+            for block in m["content"]
+            if "cache_control" in block
+        )
+        breakpoints += 1  # the system prompt's own breakpoint, not in "messages"
+        assert breakpoints <= 4, f"request exceeded the API's cache_control breakpoint limit: {breakpoints}"
 
 
 def test_no_chunks_still_returns_history_entries_without_calling_the_api(monkeypatch):

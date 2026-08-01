@@ -35,11 +35,17 @@ logger = logging.getLogger("extraction.auto_update")
 DEFAULT_STATE_PATH = "data/auto_update_state.json"
 CHECK_INTERVAL_SECONDS = 24 * 60 * 60  # once per day
 
-# Safety cap on paid Claude-vision-OCR calls per automatic run. This is an
+# Safety cap on paid Claude-vision-OCR calls per automatic run: at most this
+# many DOCUMENTS per check, not API calls -- each document can itself be up
+# to MAX_PAGES_PER_DOC (30, see extraction/claude_vision_ocr.py) pages, one
+# API call per page, so the real worst case for one automatic run is closer
+# to MAX_VISION_OCR_PER_RUN * 30 page-transcription calls, not 20. This is an
 # unattended, no-confirmation path (unlike the manual
 # extraction.claude_vision_ocr CLI), so it's deliberately bounded rather
 # than processing every flagged document in one go -- a spike in flagged
 # documents is recovered over several days' checks instead of one big bill.
+# In practice this rarely binds: on the real corpus this project was tested
+# against, only ~0.2% of documents ever needed this fallback at all.
 MAX_VISION_OCR_PER_RUN = 20
 
 

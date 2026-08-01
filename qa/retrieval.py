@@ -52,9 +52,18 @@ def build_conversational_query(question: str, previous_question: Optional[str]) 
     about clause 5?" or "is that still current?" carries almost no
     retrieval signal on its own and would otherwise return nothing relevant.
     Simple concatenation rather than an LLM query-rewrite step: no extra API
-    call, and FTS5/vector search both tolerate a little extra context fine.
-    The raw `question` (not this augmented form) is still what's shown to
-    Claude for answering -- this only shapes what gets retrieved."""
+    call, and it's a clear win for vector/semantic search (the primary
+    retrieval path when embeddings are available -- see storage/embeddings.py),
+    where more context just sharpens the similarity match.
+    Caveat: it's a real tradeoff for the FTS5 keyword fallback, since
+    fts_search()/_fts_escape() ANDs every token together -- concatenating
+    two full questions adds required terms rather than relaxing the match,
+    which can make keyword-only retrieval (no embeddings configured) return
+    LESS on a follow-up, not more. Accepted here since vector search is the
+    primary signal in the normal (embeddings-configured) setup; not a
+    concern this function alone can fix without changing how FTS queries are
+    built. The raw `question` (not this augmented form) is still what's
+    shown to Claude for answering -- this only shapes what gets retrieved."""
     if not previous_question:
         return question
     return f"{previous_question}\n{question}"
