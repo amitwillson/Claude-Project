@@ -69,6 +69,13 @@ python storage/coverage_report.py
 python -m extraction.claude_vision_ocr --dry-run   # preview candidates, no API calls
 python -m extraction.claude_vision_ocr             # actually transcribe them
 
+# Resolve detected supersession/amendment references (extraction/supersession.py)
+# into links between actual indexed documents, so Q&A can tell an old,
+# replaced circular apart from its current successor. Safe/fast to re-run any
+# time -- no PDF/API access needed. Re-run after every extraction pass, since
+# a document can only be linked once its successor has also been indexed.
+python -m extraction.resolve_supersession
+
 # Phase 3 — ask questions.
 python qa/ask.py "What is the current policy on refund of unused tickets?"
 python qa/ask.py "List all circulars on parcel booking" --exhaustive   # or just phrase it that way — auto-detected
@@ -120,15 +127,45 @@ documents whose SHA1 hasn't changed since the last run.
   This costs nothing and works offline, at some quality cost vs. a large
   hosted embedding model. The `EmbeddingProvider` interface is pluggable if
   you want to swap in a hosted provider later.
-- **Supersession detection is heuristic** (`extraction/supersession.py`):
-  regex-based matching of phrases like "in supersession of...", "in partial
-  modification of...", "amends...", "in continuation of...", plus
-  best-effort extraction of the referenced circular number/date from the
-  surrounding text. Circular numbering formats are **not** consistent across
-  years/directorates, so this will miss references in unfamiliar formats and
-  should be treated as a hint for the Q&A model to surface, not ground
-  truth. The Q&A system prompt explicitly instructs Claude to flag detected
-  conflicts/supersessions rather than silently pick one circular as current.
+- **Supersession detection + resolution -- keeping answers on the latest rule**
+  (`extraction/supersession.py` + `extraction/resolve_supersession.py`):
+  detection is regex-based matching of phrases like "in supersession of...",
+  "in partial modification of...", "amends...", "in continuation of...",
+  plus best-effort extraction of the referenced circular number/date from
+  the surrounding text (`supersession_refs` table). Circular numbering
+  formats are **not** consistent across years/directorates, so this will
+  miss references in unfamiliar formats -- a known, documented limitation,
+  not something a regex can fully solve.
+  A separate resolution pass (`extraction.resolve_supersession`, re-run
+  after every extraction pass) turns those *candidate* references into an
+  actual link between two **indexed** documents: it matches a reference's
+  number against another document's own detected `document_number`
+  (loose, punctuation-insensitive comparison; no fuzzy title guessing, to
+  avoid a second noisy layer on top of an already-heuristic first one), and
+  only accepts the link if the superseding document's date isn't *before*
+  the one it claims to replace (guards against a number-format collision
+  producing a nonsensical link). When more than one document claims to
+  supersede the same old circular, the most recently dated one wins.
+  Once resolved, this directly changes what the Q&A engine returns:
+  - **Retrieval** (`qa/retrieval.py`) drops superseded documents from the
+    default "specific" answer mode so an old rule doesn't crowd out its
+    replacement in the top-N results -- but only when a current document is
+    also available; if the only indexed match happens to be a superseded
+    one (e.g. its successor was never scraped, or resolution is
+    incomplete), it's still returned rather than answering with nothing.
+    Exhaustive mode ("list all...") always includes every match, superseded
+    or not, since that mode's purpose is a complete list/audit trail.
+  - **Answering** (`qa/answer.py`) labels every superseded excerpt handed to
+    Claude with `Status: SUPERSEDED by <successor>`, and the system prompt
+    instructs Claude to lead with the current/successor circular's rule,
+    using the superseded one only for historical context -- never as the
+    primary answer.
+  - Unresolved supersession language (a real "in supersession of..." phrase
+    whose target wasn't matched to an indexed document, or a conflict with
+    no explicit supersession language at all) still falls back to the
+    original behavior: surfaced explicitly to the user rather than silently
+    picked, with a note that supersession detection is heuristic and worth
+    verifying against the original documents.
 - **OCR fallback**: PDFs whose native text layer looks empty or sparse
   (fewer than ~20 words/page) are re-processed with `pytesseract` +
   `pdf2image`, page-by-page (so one bad/huge page doesn't cost the whole
@@ -148,7 +185,12 @@ documents whose SHA1 hasn't changed since the last run.
 - **Retrieval modes**: "specific" (default, vector top-N) vs. "exhaustive"
   (large candidate set + FTS5 keyword union), auto-triggered by phrasing like
   "list all" / "every circular" / "summarize all" / "all rules on", or
-  forced with `--exhaustive` / the Streamlit mode toggle.
+  forced with `--exhaustive` / the Streamlit mode toggle. (`chunks_fts` was
+  originally created as an FTS5 *contentless* table, which never stores
+  column values -- every keyword search silently returned zero rows because
+  the `chunk_id` join always came back NULL. Fixed in `storage/db.py`, with
+  an in-place migration that rebuilds an already-populated database's FTS
+  index from `chunks` on next connect -- no re-extraction needed.)
 - **Old binary `.doc`/`.xls` files** (pre-2007 binary Office formats) have no
   reliable pure-Python extractor in this stack and are flagged
   `needs_review` with empty text rather than silently dropped.
