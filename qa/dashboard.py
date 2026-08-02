@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from extraction import auto_update
 from qa.answer import answer_question, page_label
 from qa.retrieval import build_conversational_query, is_exhaustive_query, retrieve
+from qa.web_fallback import search_basic_answer
 from storage import db as storedb
 
 load_dotenv()
@@ -34,11 +35,15 @@ st.set_page_config(
     page_title="Traffic Commercial Intelligence — Ministry of Railways",
     page_icon="🚆",
     layout="wide",
-    # "auto" (not "expanded"): Streamlit auto-collapses the sidebar on
-    # narrow/mobile viewports with this setting, but "expanded" forces it
-    # open regardless of screen size -- on a phone that means an overlay
-    # covering most of the screen and blocking the search box underneath.
-    initial_sidebar_state="auto",
+    # "expanded", not "auto": "auto" left some desktop browsers loading
+    # with the sidebar collapsed on first paint, and the collapse/expand
+    # arrow that should reopen it is inside header[data-testid="stHeader"],
+    # which is force-hidden below -- so a user who landed collapsed had no
+    # way back in and the whole sidebar (New chat, Sources, etc.) looked
+    # simply missing. Forcing "expanded" sidesteps relying on that hidden
+    # control on first load; the CSS fix below also keeps the control
+    # visible so manually collapsing still works.
+    initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------------------------
@@ -71,6 +76,24 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
 }
 
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+/* The sidebar is meant to be permanently visible -- New chat, retrieval
+   mode, and auto-update status all live there and shouldn't be one
+   mis-click away from disappearing. Hide the collapse control entirely
+   (rather than just fixing the reopen arrow) so the sidebar can't be
+   collapsed in the first place. Streamlit's test-id for this button has
+   changed across versions in the wild, so cover the ones seen. */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stExpandSidebarButton"] {
+    display: none !important;
+}
+section[data-testid="stSidebar"] {
+    min-width: 300px !important;
+    max-width: 300px !important;
+    width: 300px !important;
+    transform: none !important;
+}
 .block-container { padding-top: 0; max-width: 1200px; }
 
 /* ---- Government-portal tricolor strip ---- */
@@ -218,6 +241,29 @@ html, body, [class*="css"] { font-family: 'Noto Sans', sans-serif; }
     margin-right: 0.5rem;
 }
 .stApp .mode-chip { color: var(--gov-navy) !important; }
+
+/* ---- General web fallback panel -- deliberately styled distinct from
+   .answer-panel (dashed border, muted background, no navy accent bar) so it
+   reads as "unverified general web result", never confusable with a
+   circular-grounded, cited answer. ---- */
+.web-answer-panel {
+    background: #f7f5ef;
+    border: 1px dashed #b9ad8f;
+    border-radius: 12px;
+    padding: 1.1rem 1.4rem;
+    margin-bottom: 1.25rem;
+    line-height: 1.6;
+}
+.stApp .web-answer-panel { color: var(--text-primary) !important; }
+.web-answer-label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+.stApp .web-answer-label { color: #8a7a4a !important; }
 
 /* ---- Citation cards ---- */
 .citation-card {
@@ -564,6 +610,15 @@ if "api_history" not in st.session_state:
     st.session_state.api_history = []
 
 with st.sidebar:
+    # Always visible (not conditional on there being a conversation yet) --
+    # a chat app's "new chat" control should always be there, same as
+    # ChatGPT/Claude.ai. Clicking with an empty conversation is a harmless
+    # no-op.
+    if st.button("New chat", use_container_width=True, type="primary"):
+        st.session_state.chat_turns = []
+        st.session_state.api_history = []
+        st.rerun()
+
     st.markdown("### Session")
     st.caption("Answers are generated only from indexed circulars. Every claim is cited; if a circular has been superseded, the current one is cited first and the old one is marked accordingly. Follow-up questions continue this same conversation.")
 
@@ -583,11 +638,6 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    if st.session_state.chat_turns and st.button("Start new conversation"):
-        st.session_state.chat_turns = []
-        st.session_state.api_history = []
-        st.rerun()
-
     user_questions = [t["text"] for t in st.session_state.chat_turns if t["role"] == "user"]
     if user_questions:
         st.markdown("**Recent questions**")
@@ -596,25 +646,32 @@ with st.sidebar:
 
 
 def _render_citations(chunks: list, turn_index: int) -> None:
-    st.markdown("#### Sources")
-    if not chunks:
-        st.caption("No chunks were retrieved for this question.")
-        return
-    status_labels = {
-        "superseded": "Superseded",
-        "amended": "Partially amended",
-        "ambiguous": "Conflicting signals",
-    }
-    for i, c in enumerate(chunks, start=1):
-        clause = c.clause_ref or "none detected"
-        page = page_label(c.page_start, c.page_end)
-        letter_no = c.circular_number or "not detected"
-        if c.status in status_labels:
-            status_badge = f'<div class="status-badge {c.status}">{status_labels[c.status]}: {c.status_note}</div>'
-        else:
-            status_badge = '<div class="status-badge current">Current</div>'
-        st.markdown(
-            f"""
+    # Collapsed by default, inside its own expander -- previously this
+    # rendered inline and unconditionally below every answer, which meant
+    # a long list of citation cards visually crowded/pushed against the
+    # answer text on every single turn. Tucking it behind a click keeps the
+    # chat scannable; the count in the label tells you it's there without
+    # opening it.
+    label = f"📚 Sources ({len(chunks)})" if chunks else "📚 Sources"
+    with st.expander(label, expanded=False):
+        if not chunks:
+            st.caption("No chunks were retrieved for this question.")
+            return
+        status_labels = {
+            "superseded": "Superseded",
+            "amended": "Partially amended",
+            "ambiguous": "Conflicting signals",
+        }
+        for i, c in enumerate(chunks, start=1):
+            clause = c.clause_ref or "none detected"
+            page = page_label(c.page_start, c.page_end)
+            letter_no = c.circular_number or "not detected"
+            if c.status in status_labels:
+                status_badge = f'<div class="status-badge {c.status}">{status_labels[c.status]}: {c.status_note}</div>'
+            else:
+                status_badge = '<div class="status-badge current">Current</div>'
+            st.markdown(
+                f"""
 <div class="citation-card">
   <div class="citation-title">{i}. {c.title} &mdash; {c.date or 'unknown date'}</div>
   <div class="citation-meta">No. {letter_no} &middot; Clause {clause} &middot; Page {page} &middot; {c.source}</div>
@@ -622,23 +679,25 @@ def _render_citations(chunks: list, turn_index: int) -> None:
   {status_badge}
 </div>
 """,
-            unsafe_allow_html=True,
-        )
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            pdf_path = Path(c.local_path) if c.local_path else None
-            if pdf_path and pdf_path.exists():
-                st.download_button(
-                    label="Download PDF",
-                    data=pdf_path.read_bytes(),
-                    file_name=pdf_path.name,
-                    mime="application/pdf",
-                    key=f"dl_{turn_index}_{c.chunk_id}",
-                )
-        with col2:
-            st.markdown(f"[Source on railwayboard site]({c.source_url})")
-        with st.expander("Excerpt text"):
-            st.text(c.text)
+                unsafe_allow_html=True,
+            )
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                pdf_path = Path(c.local_path) if c.local_path else None
+                if pdf_path and pdf_path.exists():
+                    st.download_button(
+                        label="Download PDF",
+                        data=pdf_path.read_bytes(),
+                        file_name=pdf_path.name,
+                        mime="application/pdf",
+                        key=f"dl_{turn_index}_{c.chunk_id}",
+                    )
+            with col2:
+                st.markdown(f"[Source on railwayboard site]({c.source_url})")
+            # st.popover, not a nested st.expander -- Streamlit doesn't
+            # allow an expander inside another expander.
+            with st.popover("Excerpt text"):
+                st.text(c.text)
 
 
 for turn_index, turn in enumerate(st.session_state.chat_turns):
@@ -651,6 +710,15 @@ for turn_index, turn in enumerate(st.session_state.chat_turns):
             )
             st.markdown(f'<div class="answer-panel">{turn["text"]}</div>', unsafe_allow_html=True)
             _render_citations(turn.get("chunks", []), turn_index)
+            web_answer = turn.get("web_answer")
+            if web_answer:
+                st.markdown(
+                    f'<div class="web-answer-panel"><span class="web-answer-label">'
+                    f'\U0001f310 General web result &mdash; not from an indexed circular, verify independently</span>'
+                    f'{web_answer["text"]} '
+                    f'(<a href="{web_answer["source_url"]}">{web_answer["source_name"]}</a>)</div>',
+                    unsafe_allow_html=True,
+                )
         else:
             st.markdown(turn["text"])
 
@@ -687,7 +755,31 @@ if prompt and prompt.strip():
             )
         else:
             st.session_state.api_history.extend(answer.history_entries)
+            web_answer = None
+            # Only ever consulted when the circular-grounded path found
+            # nothing to cite -- never used to second-guess or replace a
+            # real, cited answer. Keeps the "only cite indexed circulars,
+            # never guess" guarantee intact for anything this knowledge
+            # base actually covers; this is purely a courtesy for basic,
+            # out-of-scope questions (e.g. general definitions) so the user
+            # isn't left with a bare "not found".
+            if not chunks:
+                with st.spinner("No matching circular -- checking a basic web answer..."):
+                    result = search_basic_answer(question)
+                if result:
+                    web_answer = {
+                        "text": result.text,
+                        "source_url": result.source_url,
+                        "source_name": result.source_name,
+                    }
             st.session_state.chat_turns.append(
-                {"role": "assistant", "text": answer.text, "mode": answer.mode, "model": answer.model, "chunks": chunks}
+                {
+                    "role": "assistant",
+                    "text": answer.text,
+                    "mode": answer.mode,
+                    "model": answer.model,
+                    "chunks": chunks,
+                    "web_answer": web_answer,
+                }
             )
     st.rerun()
